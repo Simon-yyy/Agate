@@ -38,14 +38,14 @@
 ### 1. 安装方式
 
 #### 预编译单二进制（推荐）
-直接从 GitHub Releases 下载对应系统的可执行文件并放入系统 `PATH` 目录：
-- **Linux / macOS**: `/usr/local/bin/agate`
-- **Windows**: `C:\Users\<YourUser>\my_skills\bin\agate.exe`
+直接从 [GitHub Releases](https://github.com/Simon-yyy/Agate/releases) 下载对应操作系统的免安装单二进制文件，放入系统 `PATH` 目录即可开箱即用：
+- **Linux / macOS**: 放置于 `/usr/local/bin/agate` 并执行 `chmod +x /usr/local/bin/agate`
+- **Windows**: 放置于任一已配置在系统 `PATH` 的目录（例如 `%USERPROFILE%\bin\agate.exe` 或自定义工具箱目录）
 
-#### 源码构建
+#### 源码构建（离线零依赖）
 ```bash
-git clone https://github.com/your-org/agate.git
-cd agate
+git clone https://github.com/Simon-yyy/Agate.git
+cd Agate
 go build -mod=vendor -o agate main.go
 ```
 
