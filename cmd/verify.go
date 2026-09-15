@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"time"
 
+	"agate/pkg/guard"
+
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,15 @@ var verifyCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		startTime := time.Now()
 		fmt.Println("=== [agate verify] 启动闭环工程自检 ===")
+
+		// Phase 0: 仓库纯净度与安全合规前置拦截
+		auditResult := guard.RunPreflightAudit(".")
+		auditResult.PrintReport()
+		if auditResult.HasErrors() {
+			elapsed := time.Since(startTime).Round(time.Millisecond)
+			fmt.Printf("\033[91m[FAIL] 触发工程安全护栏熔断，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+			os.Exit(1)
+		}
 
 		// 1. 优先探测专有验证脚本
 		customScript, shellCmd, shellArgs := detectCustomScript()

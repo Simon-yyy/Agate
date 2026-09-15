@@ -118,11 +118,14 @@ func LinkOrCopy(src, dst string) error {
 ```
 
 ### 3.3 验证调度状态机 (`agate verify`)
-`agate verify` 为 Agent 提供确定性的交付验收门禁，其执行遵循以下优先级：
+`agate verify` 为 Agent 提供确定性的交付验收门禁，其执行遵循严格的两阶段防御：
 
 ```mermaid
 graph TD
-    Start[执行 agate verify] --> CheckCustom{是否存在自定义脚本?}
+    Start[执行 agate verify] --> Phase0[Phase 0: 仓库纯净度与安全合规前置拦截]
+    Phase0 --> CheckClean{通过合规扫描?<br/>- 绝对路径泄露<br/>- 二进制/大图片<br/>- 未隔离私有文件<br/>- vendor上游污染}
+    CheckClean -->|违规报错| ExitFail[输出 FAIL 退出码 1 熔断拦截]
+    CheckClean -->|合规通过| CheckCustom{是否存在自定义脚本?}
     CheckCustom -->|存在 verify.sh 或 verify.cmd| RunCustom[执行项目专属验证脚本]
     CheckCustom -->|不存在| CheckBuild{探测常见构建配置文件?}
     CheckBuild -->|pom.xml| RunMaven[mvn test-compile -q]
@@ -135,7 +138,7 @@ graph TD
     RunGo --> ResultCheck
     RunFallback --> ResultCheck
     ResultCheck -->|是| ExitPass[输出 PASS 退出码 0]
-    ResultCheck -->|否| ExitFail[输出 FAIL 退出码 1 拦截]
+    ResultCheck -->|否| ExitFail
 ```
 
 ---
