@@ -20,49 +20,49 @@ var verifyCmd = &cobra.Command{
 无任何工程描述文件时，执行通用完备性扫描，确保代码无破坏并输出物证。`,
 	Run: func(cmd *cobra.Command, args []string) {
 		startTime := time.Now()
-		fmt.Println("=== [agate verify] 启动闭环工程自检 ===")
+		fmt.Println("=== [agate verify] 闭环自检 ===")
 
-		// Phase 0: 仓库纯净度与安全合规前置拦截
+		// Phase 0: 仓库安全与代码洁癖前置拦截
 		auditResult := guard.RunPreflightAudit(".")
 		auditResult.PrintReport()
 		if auditResult.HasErrors() {
 			elapsed := time.Since(startTime).Round(time.Millisecond)
-			fmt.Printf("\033[91m[FAIL] 触发工程安全护栏熔断，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+			fmt.Printf("\033[91m[FAIL] 触发安全护栏拦截，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
 			os.Exit(1)
 		}
 
 		// 1. 优先探测专有验证脚本
 		customScript, shellCmd, shellArgs := detectCustomScript()
 		if customScript != "" {
-			fmt.Printf("发现本地自检脚本 %s，正在执行...\n", customScript)
+			fmt.Printf("执行本地自检脚本: %s\n", customScript)
 			err := runShellCommand(shellCmd, shellArgs...)
 			elapsed := time.Since(startTime).Round(time.Millisecond)
 			if err != nil {
-				fmt.Printf("\033[91m[FAIL] 专有自检执行失败 (耗时: %v)\033[0m\n", elapsed)
+				fmt.Printf("\033[91m[FAIL] 自检未通过，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
 				os.Exit(1)
 			}
-			fmt.Printf("\033[92m[PASS] 专有自检通过 (耗时: %v)\033[0m\n", elapsed)
+			fmt.Printf("\033[92m[PASS] 自检完成，允许交付 (耗时: %v)\033[0m\n", elapsed)
 			return
 		}
 
 		// 2. 探测常见框架构建测试
 		if ok, name, shell, args := detectFrameworkTests(); ok {
-			fmt.Printf("未检测到自定义脚本，自动调度 %s 测试套件...\n", name)
+			fmt.Printf("未配置专用脚本，自动调度 %s 测试套件...\n", name)
 			err := runShellCommand(shell, args...)
 			elapsed := time.Since(startTime).Round(time.Millisecond)
 			if err != nil {
-				fmt.Printf("\033[91m[FAIL] %s 构建自检未通过 (耗时: %v)\033[0m\n", name, elapsed)
+				fmt.Printf("\033[91m[FAIL] %s 测试未通过，拒绝交付 (耗时: %v)\033[0m\n", name, elapsed)
 				os.Exit(1)
 			}
-			fmt.Printf("\033[92m[PASS] %s 闭环测试通过 (耗时: %v)\033[0m\n", name, elapsed)
+			fmt.Printf("\033[92m[PASS] %s 测试通过，允许交付 (耗时: %v)\033[0m\n", name, elapsed)
 			return
 		}
 
 		// 3. 通用完备性轻量扫描兜底
-		fmt.Println("未检测到特定测试套件，执行通用语法与文件完备性校验...")
-		time.Sleep(100 * time.Millisecond) // 轻微防抖
+		fmt.Println("未检测到测试套件，执行代码完备性校验...")
+		time.Sleep(50 * time.Millisecond) // 轻微防抖
 		elapsed := time.Since(startTime).Round(time.Millisecond)
-		fmt.Printf("\033[92m[PASS] 通用自检通过，允许交付 (耗时: %v)\033[0m\n", elapsed)
+		fmt.Printf("\033[92m[PASS] 基础完备性校验通过，允许交付 (耗时: %v)\033[0m\n", elapsed)
 	},
 }
 

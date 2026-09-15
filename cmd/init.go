@@ -74,12 +74,12 @@ var initCmd = &cobra.Command{
 			fmt.Println("  \033[92m[+] 已生成 contexts/context.md 基线\033[0m")
 		}
 
-		// 6. 安装本地 Git Hook
+		// 6. 安装本地 Git 物理双重门禁
 		if git.IsGitRepo() && !flagNoHook {
-			if err := git.InstallPreCommitHook(); err != nil {
-				fmt.Printf("  \033[93m[!] 挂载 pre-commit 钩子提示: %v\033[0m\n", err)
+			if err := git.InstallHooks(); err != nil {
+				fmt.Printf("  \033[93m[!] 挂载 Git 物理门禁提示: %v\033[0m\n", err)
 			} else {
-				fmt.Println("  \033[92m[+] 已挂载私有 pre-commit 门禁 -> agate verify\033[0m")
+				fmt.Println("  \033[92m[+] 已挂载私有 Git 双重物理门禁 (pre-commit 验证 + pre-push 阻断)\033[0m")
 			}
 		}
 

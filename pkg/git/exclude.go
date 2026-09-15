@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -25,15 +26,59 @@ var DefaultExcludedItems = []string{
 	"logs/",
 }
 
-// IsGitRepo 判断当前目录是否处于 Git 仓库根目录下
-func IsGitRepo() bool {
+// GetGitCommonDir 解析并返回当前工程真实的 Git 存储公共目录（兼容常规仓、Git Worktree 与 Submodule）
+func GetGitCommonDir() (string, error) {
 	stat, err := os.Stat(".git")
-	return err == nil && stat.IsDir()
+	if err == nil {
+		if stat.IsDir() {
+			return ".git", nil
+		}
+		// 若 .git 为普通文件，说明处于 git worktree 或 submodule 下
+		content, readErr := os.ReadFile(".git")
+		if readErr == nil {
+			line := strings.TrimSpace(string(content))
+			if strings.HasPrefix(line, "gitdir:") {
+				gitDir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+				if !filepath.IsAbs(gitDir) {
+					gitDir = filepath.Clean(filepath.Join(".", gitDir))
+				}
+				// 检查 worktree 内部是否有 commondir 指向主仓
+				commondirFile := filepath.Join(gitDir, "commondir")
+				if cContent, cErr := os.ReadFile(commondirFile); cErr == nil {
+					cDir := strings.TrimSpace(string(cContent))
+					if !filepath.IsAbs(cDir) {
+						cDir = filepath.Clean(filepath.Join(gitDir, cDir))
+					}
+					return cDir, nil
+				}
+				return gitDir, nil
+			}
+		}
+	}
+
+	// 兜底调用 git 原生命令获取公共目录
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	out, cmdErr := cmd.Output()
+	if cmdErr == nil {
+		res := strings.TrimSpace(string(out))
+		if res != "" {
+			return filepath.Clean(res), nil
+		}
+	}
+
+	return "", fmt.Errorf("当前目录不在任何 Git 仓库或工作树中")
 }
 
-// ApplyPrivateExclusions 向 .git/info/exclude 注入隔离清单
+// IsGitRepo 判断当前目录是否处于 Git 仓库或有效 Git 工作树下
+func IsGitRepo() bool {
+	_, err := GetGitCommonDir()
+	return err == nil
+}
+
+// ApplyPrivateExclusions 向 Git 的 info/exclude 注入隔离清单（原生兼容主仓与 Worktree）
 func ApplyPrivateExclusions(items []string) (int, error) {
-	if !IsGitRepo() {
+	gitCommonDir, err := GetGitCommonDir()
+	if err != nil {
 		return 0, nil // 非 Git 仓库，跳过
 	}
 
@@ -41,9 +86,9 @@ func ApplyPrivateExclusions(items []string) (int, error) {
 		items = DefaultExcludedItems
 	}
 
-	excludePath := filepath.Join(".git", "info", "exclude")
+	excludePath := filepath.Join(gitCommonDir, "info", "exclude")
 	if err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {
-		return 0, fmt.Errorf("创建 .git/info 目录失败: %w", err)
+		return 0, fmt.Errorf("创建 Git info 目录失败: %w", err)
 	}
 
 	hasMarker := false

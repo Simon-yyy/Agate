@@ -56,7 +56,7 @@
 
 ### 2.3 底层 Git 与执行层
 - **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，避免修改团队共用的 `.gitignore`；
-- **独立 Hook 路径**：通过 `git config --local core.hooksPath .git/custom-hooks` 挂载私有 `pre-commit`，不破坏用户全局或其他三方 Hook。
+- **双重物理 Hook 路径**：通过 `git config --local core.hooksPath .git/custom-hooks` 同时挂载私有 `pre-commit`（代码纯净度与单测自检）与 `pre-push`（物理阻断 AI/脚本自动化偷跑推流，锁定提交权 100% 归人类），不破坏用户全局或其他三方 Hook。
 
 ---
 

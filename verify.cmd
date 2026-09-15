@@ -1,51 +1,49 @@
 @echo off
 chcp 65001 >nul
 
-echo === [Agate Local Verification] ===
+echo === [Agate 本地自检] ===
 
-:: 1. Core Architecture Files Check
+:: 1. 核心架构文件完备性检查
 if not exist "main.go" (
-    echo [FAIL] Missing main.go
+    echo [FAIL] 缺少核心架构文件: main.go
     exit /b 1
 )
 if not exist "go.mod" (
-    echo [FAIL] Missing go.mod
+    echo [FAIL] 缺少核心架构文件: go.mod
     exit /b 1
 )
 if not exist "vendor\modules.txt" (
-    echo [FAIL] Missing vendor\modules.txt
+    echo [FAIL] 缺少核心架构依赖: vendor\modules.txt
     exit /b 1
 )
 if not exist "AGENTS.md" (
-    echo [FAIL] Missing AGENTS.md
+    echo [FAIL] 缺少导航地图文件: AGENTS.md
     exit /b 1
 )
 
 :: 2. Auto detect Go compiler (Support custom GO_BIN or system PATH)
+set "HAS_GO=0"
 if not "%GO_BIN%"=="" (
     set "GO_CMD=%GO_BIN%"
+    set "HAS_GO=1"
 ) else (
-    set "GO_CMD=go"
-)
-
-:: 3. If Go compiler exists, run unit tests
-set "HAS_GO=0"
-if exist "%GO_CMD%" set "HAS_GO=1"
-if "%HAS_GO%"=="0" (
-    where %GO_CMD% >nul 2>nul
-    if %errorlevel% equ 0 set "HAS_GO=1"
+    where go >nul 2>&1
+    if not errorlevel 1 (
+        set "GO_CMD=go"
+        set "HAS_GO=1"
+    )
 )
 
 if "%HAS_GO%"=="1" (
-    echo Running unit test suite...
+    echo 正在运行单元测试套件...
     "%GO_CMD%" test -mod=vendor -v ./pkg/...
     if %errorlevel% neq 0 (
-        echo [FAIL] Unit tests failed
+        echo [FAIL] 单元测试执行失败
         exit /b 1
     )
 ) else (
-    echo Info: No local Go compiler detected in PATH, skipped tests. Static structure is valid.
+    echo 提示: 未检测到 Go 编译器，跳过单测调度，静态结构完整
 )
 
-echo [PASS] Agate self-verification passed. Deliverable is clean.
+echo [PASS] 本地交付物校验通过，结构完备
 exit /b 0

@@ -40,7 +40,7 @@ func (r *AuditResult) HasErrors() bool {
 // PrintReport 打印彩色审计报告
 func (r *AuditResult) PrintReport() {
 	if len(r.Violations) == 0 {
-		fmt.Println("  \033[92m[✓] 仓库纯净度与安全合规扫描全部通过\033[0m")
+		fmt.Println("  \033[92m[✓] 仓库安全与代码洁癖合规\033[0m")
 		return
 	}
 
@@ -81,7 +81,13 @@ func RunPreflightAudit(root string) *AuditResult {
 	// 3. 检查代码中的个人机器绝对路径硬编码
 	auditHardcodedPaths(root, res)
 
-	// 4. 检查 vendor 目录纯净度
+	// 4. 检查临时残留文件与调试草稿（代码洁癖）
+	auditTemporaryAndScratchFiles(root, res)
+
+	// 5. 检查源码内容级洁癖（冲突标记、调试断点、伪代码占位符）
+	auditContentHygiene(root, res)
+
+	// 6. 检查 vendor 目录纯净度
 	auditVendorCleanliness(root, res)
 
 	return res
@@ -325,6 +331,149 @@ func auditVendorCleanliness(root string, res *AuditResult) {
 			}
 		}
 
+		return nil
+	})
+}
+
+// auditTemporaryAndScratchFiles 检查未隔离的临时文件与草稿测试文件
+func auditTemporaryAndScratchFiles(root string, res *AuditResult) {
+	tempExts := map[string]string{
+		".tmp":  "临时生成文件",
+		".temp": "临时生成文件",
+		".bak":  "临时备份文件",
+		".swp":  "编辑器交换临时文件",
+		".orig": "合并冲突备份文件",
+	}
+
+	tempPrefixes := []string{"temp_", "tmp_", "scratch_", "test_scratch_"}
+
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "vendor" || d.Name() == "node_modules" || d.Name() == ".agent" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, _ := filepath.Rel(root, path)
+		slashRel := filepath.ToSlash(rel)
+		fileName := strings.ToLower(d.Name())
+		ext := strings.ToLower(filepath.Ext(path))
+
+		isTemp := false
+		reason := ""
+		if desc, ok := tempExts[ext]; ok {
+			isTemp = true
+			reason = desc
+		} else {
+			for _, pfx := range tempPrefixes {
+				if strings.HasPrefix(fileName, pfx) {
+					isTemp = true
+					reason = "临时/草稿脚本文件"
+					break
+				}
+			}
+		}
+
+		if isTemp {
+			tracked := isGitTracked(root, slashRel)
+			ignored := isGitIgnored(root, slashRel)
+			if tracked || !ignored {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "ERROR",
+					Category:   "代码洁癖-临时文件残留",
+					File:       slashRel,
+					Message:    fmt.Sprintf("检测到未隔离的%s: %s", reason, d.Name()),
+					Suggestion: "请物理删除该临时文件，或将其添加至 .git/info/exclude 隐形隔离",
+				})
+			}
+		}
+		return nil
+	})
+}
+
+// auditContentHygiene 扫描源码中的 Git 冲突标记、调试断点与伪代码占位符
+func auditContentHygiene(root string, res *AuditResult) {
+	conflictRegex := regexp.MustCompile(`^(<{7}|={7}|>{7})(\s|$)`)
+	debuggerRegex := regexp.MustCompile(`\b(?:debugger|breakpoint\(\)|pdb\.set_trace\(\))`)
+	lazyRegex := regexp.MustCompile(`(?:保持不变|保持原有逻辑不变|rest of code unchanged)`)
+
+	validExts := map[string]bool{
+		".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
+		".py": true, ".java": true, ".vue": true, ".html": true, ".sh": true,
+		".cmd": true, ".bat": true, ".rb": true, ".php": true, ".rs": true,
+		".c": true, ".cpp": true, ".h": true,
+	}
+
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "vendor" || d.Name() == "node_modules" || d.Name() == "docs" || d.Name() == "internal" || d.Name() == ".agent" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, _ := filepath.Rel(root, path)
+		slashPath := filepath.ToSlash(rel)
+		ext := strings.ToLower(filepath.Ext(path))
+
+		if !validExts[ext] {
+			return nil
+		}
+
+		// 豁免 guard 包自身与单测中的反例定义
+		if strings.HasPrefix(slashPath, "pkg/guard/") {
+			return nil
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+
+		scanner := bufio.NewScanner(f)
+		lineNum := 0
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Text()
+			trimmed := strings.TrimSpace(line)
+
+			if conflictRegex.MatchString(trimmed) {
+				res.Violations = append(res.Violations, Violation{
+					Level:       "ERROR",
+					Category:    "代码洁癖-Git冲突残留",
+					File:        slashPath,
+					LineNumber:  lineNum,
+					LineContent: line,
+					Message:     "检测到未解决的 Git 冲突标记",
+					Suggestion:  "请人工核对并消除 Git 冲突标记",
+				})
+			} else if debuggerRegex.MatchString(line) {
+				res.Violations = append(res.Violations, Violation{
+					Level:       "ERROR",
+					Category:    "代码洁癖-调试断点残留",
+					File:        slashPath,
+					LineNumber:  lineNum,
+					LineContent: line,
+					Message:     "检测到残留的调试断点代码",
+					Suggestion:  "请清理 debugger 或 breakpoint 等临时排错语句",
+				})
+			} else if lazyRegex.MatchString(line) {
+				res.Violations = append(res.Violations, Violation{
+					Level:       "ERROR",
+					Category:    "代码洁癖-伪代码占位符",
+					File:        slashPath,
+					LineNumber:  lineNum,
+					LineContent: line,
+					Message:     "检测到未落地的伪代码占位符（防伪代码红线）",
+					Suggestion:  "代码必须完整可运行，请补齐真实完整实现",
+				})
+			}
+		}
 		return nil
 	})
 }

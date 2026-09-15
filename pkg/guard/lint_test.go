@@ -106,3 +106,71 @@ func TestCatchVendorPollution(t *testing.T) {
 		t.Errorf("未按预期分类为'Vendor依赖污染'")
 	}
 }
+
+func TestCatchTemporaryFiles(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-temp-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 注入临时备份与临时排错脚本
+	_ = os.WriteFile(filepath.Join(tempDir, "app.go.bak"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, "temp_test.py"), []byte("print('debug')"), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	if !res.HasErrors() {
+		t.Errorf("未能成功捕获临时残留文件")
+	}
+
+	count := 0
+	for _, v := range res.Violations {
+		if v.Category == "代码洁癖-临时文件残留" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("预期捕获 2 处临时文件违规，实际捕获: %d", count)
+	}
+}
+
+func TestCatchContentHygiene(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-hygiene-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 注入冲突标记、调试断点与伪代码占位符
+	dirtyCode := `package main
+
+func foo() {
+<<<<<<< HEAD
+	debugger
+=======
+	// ... 保持原有逻辑不变
+>>>>>>> main
+}
+`
+	_ = os.WriteFile(filepath.Join(tempDir, "app.go"), []byte(dirtyCode), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	if !res.HasErrors() {
+		t.Errorf("未能成功捕获代码内容洁癖违规")
+	}
+
+	categories := make(map[string]bool)
+	for _, v := range res.Violations {
+		categories[v.Category] = true
+	}
+
+	if !categories["代码洁癖-Git冲突残留"] {
+		t.Errorf("未捕获 Git冲突残留")
+	}
+	if !categories["代码洁癖-调试断点残留"] {
+		t.Errorf("未捕获 调试断点残留")
+	}
+	if !categories["代码洁癖-伪代码占位符"] {
+		t.Errorf("未捕获 伪代码占位符")
+	}
+}
