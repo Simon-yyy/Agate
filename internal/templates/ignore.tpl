@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+out/
+target/
+*-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.min.js
+*.map
+*.log
+logs/
+.git/
+.gemini/
+.cursor/
+.agents/
+.ai-memory/
