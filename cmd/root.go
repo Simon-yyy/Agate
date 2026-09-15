@@ -30,4 +30,6 @@ func Execute() {
 
 func init() {
 	rootCmd.SetVersionTemplate("agate version {{.Version}}\n")
+	rootCmd.SilenceUsage = true
+	rootCmd.SilenceErrors = true
 }

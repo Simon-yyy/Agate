@@ -21,7 +21,7 @@ if not exist "AGENTS.md" (
     exit /b 1
 )
 
-:: 2. Auto detect Go compiler (Support custom GO_BIN or system PATH)
+:: 2. Auto detect Go compiler (Support custom GO_BIN, system PATH or GOROOT)
 set "HAS_GO=0"
 if not "%GO_BIN%"=="" (
     set "GO_CMD=%GO_BIN%"
@@ -31,6 +31,11 @@ if not "%GO_BIN%"=="" (
     if not errorlevel 1 (
         set "GO_CMD=go"
         set "HAS_GO=1"
+    ) else if not "%GOROOT%"=="" (
+        if exist "%GOROOT%\bin\go.exe" (
+            set "GO_CMD=%GOROOT%\bin\go.exe"
+            set "HAS_GO=1"
+        )
     )
 )
 

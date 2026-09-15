@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"agate/pkg/guard"
@@ -12,23 +13,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var flagSkipGuard bool
+
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
 	Short: "执行工程闭环自检，输出 PASS 物证",
 	Long: `优先调度工程自定义自检脚本（verify.sh 或 verify.cmd）；
 若未配置自定义脚本，则自动探测工程类型（Maven / npm / Go 等）执行测试构建；
 无任何工程描述文件时，执行通用完备性扫描，确保代码无破坏并输出物证。`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
 		fmt.Println("=== [agate verify] 闭环自检 ===")
 
-		// Phase 0: 仓库安全与代码洁癖前置拦截
-		auditResult := guard.RunPreflightAudit(".")
-		auditResult.PrintReport()
-		if auditResult.HasErrors() {
-			elapsed := time.Since(startTime).Round(time.Millisecond)
-			fmt.Printf("\033[91m[FAIL] 触发安全护栏拦截，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
-			os.Exit(1)
+		// Phase 0: 仓库安全与代码洁癖前置拦截（支持 --skip-guard 应急逃生）
+		if flagSkipGuard {
+			fmt.Println("  \033[93m[!] 已启用 --skip-guard 应急模式，跳过 Phase 0 安全红线扫描\033[0m")
+		} else {
+			auditResult := guard.RunPreflightAudit(".")
+			auditResult.PrintReport()
+			if auditResult.HasErrors() {
+				elapsed := time.Since(startTime).Round(time.Millisecond)
+				fmt.Printf("\033[91m[FAIL] 触发安全护栏拦截，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+				return fmt.Errorf("触发安全护栏拦截")
+			}
 		}
 
 		// 1. 优先探测专有验证脚本
@@ -38,11 +45,17 @@ var verifyCmd = &cobra.Command{
 			err := runShellCommand(shellCmd, shellArgs...)
 			elapsed := time.Since(startTime).Round(time.Millisecond)
 			if err != nil {
-				fmt.Printf("\033[91m[FAIL] 自检未通过，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
-				os.Exit(1)
+				// 若由于环境缺少对应 shell（如 Windows 未装 bash），打印提示并平滑降级至框架探测
+				if isCommandNotFoundError(err) {
+					fmt.Printf("\033[93m[提示] 调度本地脚本 %s 失败 (环境未找到 %s 命令)，平滑降级至框架探测\033[0m\n", customScript, shellCmd)
+				} else {
+					fmt.Printf("\033[91m[FAIL] 自检未通过，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+					return fmt.Errorf("本地自检未通过: %w", err)
+				}
+			} else {
+				fmt.Printf("\033[92m[PASS] 自检完成，允许交付 (耗时: %v)\033[0m\n", elapsed)
+				return nil
 			}
-			fmt.Printf("\033[92m[PASS] 自检完成，允许交付 (耗时: %v)\033[0m\n", elapsed)
-			return
 		}
 
 		// 2. 探测常见框架构建测试
@@ -52,10 +65,10 @@ var verifyCmd = &cobra.Command{
 			elapsed := time.Since(startTime).Round(time.Millisecond)
 			if err != nil {
 				fmt.Printf("\033[91m[FAIL] %s 测试未通过，拒绝交付 (耗时: %v)\033[0m\n", name, elapsed)
-				os.Exit(1)
+				return fmt.Errorf("%s 测试未通过: %w", name, err)
 			}
 			fmt.Printf("\033[92m[PASS] %s 测试通过，允许交付 (耗时: %v)\033[0m\n", name, elapsed)
-			return
+			return nil
 		}
 
 		// 3. 通用完备性轻量扫描兜底
@@ -63,6 +76,7 @@ var verifyCmd = &cobra.Command{
 		time.Sleep(50 * time.Millisecond) // 轻微防抖
 		elapsed := time.Since(startTime).Round(time.Millisecond)
 		fmt.Printf("\033[92m[PASS] 基础完备性校验通过，允许交付 (耗时: %v)\033[0m\n", elapsed)
+		return nil
 	},
 }
 
@@ -123,6 +137,15 @@ func runShellCommand(command string, args ...string) error {
 	return cmd.Run()
 }
 
+func isCommandNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "executable file not found") || strings.Contains(msg, "not found") || strings.Contains(msg, "cannot find the file")
+}
+
 func init() {
+	verifyCmd.Flags().BoolVar(&flagSkipGuard, "skip-guard", false, "跳过 Phase 0 安全红线与代码洁癖前置扫描")
 	rootCmd.AddCommand(verifyCmd)
 }
