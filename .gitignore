@@ -4,8 +4,6 @@
 *.dll
 *.so
 *.dylib
-adh
-adh.exe
 agate
 agate.exe
 
@@ -15,7 +13,9 @@ agate.exe
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# GoReleaser build artifacts
+# Local build & GoReleaser artifacts
+bin/**/*.exe
+bin/*.exe
 dist/
 
 # OS / Editor files
