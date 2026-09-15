@@ -22,3 +22,5 @@ dist/
 .DS_Store
 Thumbs.db
 docs/CODE_REVIEW.md
+docs/GUARD_FALSE_POSITIVE_ANALYSIS.md
+
