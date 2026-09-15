@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"agate/internal/templates"
 	"agate/pkg/harness"
@@ -27,6 +28,69 @@ var TargetMapping = map[AgentTarget]string{
 	TargetWindsurf:    ".windsurfrules",
 }
 
+// DetectExistingTargets 探测当前工程中已有的 Agent 配置文件或目录
+func DetectExistingTargets(root string) []AgentTarget {
+	var detected []AgentTarget
+
+	// 探测 Cursor
+	if _, err := os.Stat(filepath.Join(root, ".cursorrules")); err == nil {
+		detected = append(detected, TargetCursor)
+	} else if fi, err := os.Stat(filepath.Join(root, ".cursor")); err == nil && fi.IsDir() {
+		detected = append(detected, TargetCursor)
+	}
+
+	// 探测 Antigravity
+	if fi, err := os.Stat(filepath.Join(root, ".gemini")); err == nil && fi.IsDir() {
+		detected = append(detected, TargetAntigravity)
+	}
+
+	// 探测 Claude
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err == nil {
+		detected = append(detected, TargetClaude)
+	}
+
+	// 探测 Windsurf
+	if _, err := os.Stat(filepath.Join(root, ".windsurfrules")); err == nil {
+		detected = append(detected, TargetWindsurf)
+	}
+
+	return detected
+}
+
+// ResolveTargets 解析最终生效的 Agent 目标
+func ResolveTargets(rawTargets []string, root string) []AgentTarget {
+	var targets []AgentTarget
+	hasAll := false
+	for _, t := range rawTargets {
+		lower := strings.ToLower(strings.TrimSpace(t))
+		if lower == "all" {
+			hasAll = true
+			break
+		}
+		if lower != "" {
+			targets = append(targets, AgentTarget(lower))
+		}
+	}
+
+	if hasAll {
+		return []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf}
+	}
+
+	// 若用户显式指定了 targets，按指定走
+	if len(targets) > 0 {
+		return targets
+	}
+
+	// 优先嗅探已有环境
+	existing := DetectExistingTargets(root)
+	if len(existing) > 0 {
+		return existing
+	}
+
+	// 空白工程默认挂载最主流的两个工具，避免全量轰炸
+	return []AgentTarget{TargetCursor, TargetAntigravity}
+}
+
 // DistributeRules 将规约内容分发至各 Agent 目标文件
 func DistributeRules(customRules []byte, targets []AgentTarget) error {
 	content := customRules
@@ -35,12 +99,7 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 	}
 
 	if len(targets) == 0 {
-		targets = []AgentTarget{
-			TargetAntigravity,
-			TargetCursor,
-			TargetClaude,
-			TargetWindsurf,
-		}
+		targets = ResolveTargets(nil, ".")
 	}
 
 	for _, target := range targets {

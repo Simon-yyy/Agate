@@ -53,11 +53,8 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		// 3. 挂载规约
-		var targets []adapter.AgentTarget
-		for _, t := range flagTargets {
-			targets = append(targets, adapter.AgentTarget(t))
-		}
+		// 3. 挂载规约 (智能按需探测或按指定分发)
+		targets := adapter.ResolveTargets(flagTargets, ".")
 		globalRules, _ := adapter.LoadGlobalRules()
 		if err := adapter.DistributeRules(globalRules, targets); err != nil {
 			return err
@@ -86,9 +83,11 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Println("\n\033[92m=== [完成] 工程初始化完毕 ===\033[0m")
-		fmt.Println("\033[93m👉 请直接复制以下指令发送给 AI 开启冷启动：\033[0m")
-		fmt.Println("\033[96m分析当前工程代码与配置，完善 AGENTS.md 与 contexts/context.md。\033[0m")
+		fmt.Println("\n\033[92m=== [完成] 工程护栏挂载完毕 ===\033[0m")
+		fmt.Println("\033[93m💡 后续协同建议：\033[0m")
+		fmt.Println("  1. 规约已在本地注入生效，在此项目中与 AI 对话将默认遵守“方案对齐 + 闭环自检”安全门禁；")
+		fmt.Println("  2. (可选冷启动) 如需为 AI 注入全局架构认知，可向 AI 发送：")
+		fmt.Println("     \033[96m“阅读 AGENTS.md 骨架，结合当前代码目录，简要补齐各模块核心职责与关键入口。”\033[0m")
 		return nil
 	},
 }

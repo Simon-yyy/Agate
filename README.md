@@ -54,27 +54,32 @@ go build -mod=vendor -o agate main.go
 进入任意代码仓库根目录，执行初始化：
 
 ```bash
-# 1. 初始化护栏（自动分发规约、生成地图骨架、设置私有隔离）
+# 1. 初始化护栏（默认智能探测既有环境，或挂载主流 Agent）
 agate init
 
-# 2. 检查当前工程健康度（闭环验证）
+# 提示：若仅使用特定工具，可按需精准挂载（纯净无多余文件）：
+# agate init -t cursor      # 仅针对 Cursor
+# agate init -t claude      # 仅针对 Claude Code
+# agate init -t all         # 全量挂载所有工具
+
+# 2. 检查当前工程健康度与仓库纯净度（闭环验证）
 agate verify
 ```
 
-执行 `agate init` 后，终端将输出指引：
+执行 `agate init -t cursor`（或智能探测）后，终端输出清晰指引：
 ```text
 [agate] 正在为工程 [my-project] 挂载防护体系...
   [+] 已生成 .ignore (索引防爆仓)
-  [+] 已配置 .git/info/exclude (私有配置完全隐形)
-  [+] 已挂载 antigravity 规约 -> .gemini/GEMINI.md
+  [+] 已向 .git/info/exclude 注入 13 项隔离清单 (私有配置完全隐形)
   [+] 已挂载 cursor 规约 -> .cursorrules
-  [+] 已挂载 claude 规约 -> CLAUDE.md
   [+] 已生成 AGENTS.md 骨架
   [+] 已生成 contexts/context.md 基线
   [+] 已挂载私有 pre-commit 门禁 -> agate verify
-=== [完成] 工程初始化完毕 ===
-👉 请直接复制以下指令发送给 AI 开启冷启动：
-分析当前工程代码与配置，完善 AGENTS.md 与 contexts/context.md。
+=== [完成] 工程护栏挂载完毕 ===
+💡 后续协同建议：
+  1. 规约已在本地注入生效，在此项目中与 AI 对话将默认遵守“方案对齐 + 闭环自检”安全门禁；
+  2. (可选冷启动) 如需为 AI 注入全局架构认知，可向 AI 发送：
+     “阅读 AGENTS.md 骨架，结合当前代码目录，简要补齐各模块核心职责与关键入口。”
 ```
 
 ---

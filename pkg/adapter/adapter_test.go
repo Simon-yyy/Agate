@@ -52,3 +52,36 @@ func TestTargetMappingCompleteness(t *testing.T) {
 		t.Errorf("Antigravity 路径映射错误，预期 %s，实际 %s", expectedGemini, TargetMapping[TargetAntigravity])
 	}
 }
+
+func TestResolveTargets(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-resolve-test-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 1. 显式指定单目标
+	res := ResolveTargets([]string{"cursor"}, tempDir)
+	if len(res) != 1 || res[0] != TargetCursor {
+		t.Errorf("显式指定 cursor 失败，得到: %v", res)
+	}
+
+	// 2. 显式指定 all
+	resAll := ResolveTargets([]string{"all"}, tempDir)
+	if len(resAll) != 4 {
+		t.Errorf("指定 all 预期 4 个目标，得到: %v", resAll)
+	}
+
+	// 3. 空白目录默认推荐 2 个主流目标
+	resDefault := ResolveTargets(nil, tempDir)
+	if len(resDefault) != 2 {
+		t.Errorf("空白目录预期默认 2 个目标，得到: %v", resDefault)
+	}
+
+	// 4. 嗅探已存在环境 (.cursorrules)
+	_ = os.WriteFile(filepath.Join(tempDir, ".cursorrules"), []byte(""), 0644)
+	resDetected := ResolveTargets(nil, tempDir)
+	if len(resDetected) != 1 || resDetected[0] != TargetCursor {
+		t.Errorf("嗅探已有 .cursorrules 失败，得到: %v", resDetected)
+	}
+}
