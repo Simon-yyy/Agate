@@ -12,7 +12,7 @@ if ($env:GO_BIN -and (Test-Path $env:GO_BIN)) {
 }
 
 # 2. 解析 cmd/root.go 中的版本号
-$version = "latest"
+$version = "0.1.0"
 $lines = Get-Content -Path "cmd/root.go"
 foreach ($line in $lines) {
     if ($line -match 'version\s*=\s*"([^"]+)"') {
@@ -21,18 +21,25 @@ foreach ($line in $lines) {
     }
 }
 
-$targetDir = "bin/v$version"
-if (!(Test-Path $targetDir)) {
-    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+$winDir = "bin/windows"
+$winVerDir = "bin/v$version/windows"
+
+if (!(Test-Path $winDir)) {
+    New-Item -ItemType Directory -Force -Path $winDir | Out-Null
+}
+if (!(Test-Path $winVerDir)) {
+    New-Item -ItemType Directory -Force -Path $winVerDir | Out-Null
 }
 
-Write-Host "=== [Agate 版本构建与归档] ===" -ForegroundColor Cyan
+Write-Host "=== [Agate Windows 版本构建与归档] ===" -ForegroundColor Cyan
 Write-Host "正在构建版本: v$version ..." -ForegroundColor Gray
 
-& $goCmd build -mod=vendor -o "$targetDir/agate.exe" main.go
+& $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate_v${version}_windows_amd64.exe" main.go
 
-Copy-Item -Force "$targetDir/agate.exe" "bin/agate.exe"
+Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winVerDir/agate.exe"
+Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winDir/agate_windows_amd64.exe"
+Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winDir/agate.exe"
 
-Write-Host "[+] 成功归档至: $targetDir/agate.exe" -ForegroundColor Green
-Write-Host "[+] 同步更新至: bin/agate.exe (latest)" -ForegroundColor Green
+Write-Host "[+] 成功归档至: $winVerDir/agate.exe" -ForegroundColor Green
+Write-Host "[+] 同步更新至: $winDir/agate.exe" -ForegroundColor Green
 Write-Host "=== 归档完成 ===" -ForegroundColor Cyan
