@@ -30,8 +30,7 @@ if (!(Test-Path $winVerDir)) {
 Write-Host "=== [Agate Windows 版本构建与归档] ===" -ForegroundColor Cyan
 Write-Host "正在构建版本: v$version ..." -ForegroundColor Gray
 
-& $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate_v${version}_windows_amd64.exe" main.go
-Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winVerDir/agate.exe"
+& $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate.exe" main.go
 
 Write-Host "[+] 成功归档至: $winVerDir/agate.exe" -ForegroundColor Green
 Write-Host "=== 归档完成 ===" -ForegroundColor Cyan

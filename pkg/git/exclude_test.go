@@ -80,34 +80,45 @@ func TestGitWorktreeCompatibility(t *testing.T) {
 	wtRepo := filepath.Join(tempDir, "wt")
 	_ = os.MkdirAll(mainRepo, 0755)
 
+	cleanGitCmd := func(dir string, args ...string) *exec.Cmd {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		var cleanEnv []string
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "GIT_DIR=") &&
+				!strings.HasPrefix(e, "GIT_INDEX_FILE=") &&
+				!strings.HasPrefix(e, "GIT_WORK_TREE=") &&
+				!strings.HasPrefix(e, "GIT_COMMON_DIR=") &&
+				!strings.HasPrefix(e, "GIT_PREFIX=") {
+				cleanEnv = append(cleanEnv, e)
+			}
+		}
+		cmd.Env = cleanEnv
+		return cmd
+	}
+
 	// 初始化主仓库
-	cmdInit := exec.Command("git", "init")
-	cmdInit.Dir = mainRepo
+	cmdInit := cleanGitCmd(mainRepo, "init")
 	if err := cmdInit.Run(); err != nil {
 		t.Skip("本地环境未安装 git，跳过 worktree 实机测试")
 	}
 
-	cmdCfgEmail := exec.Command("git", "config", "user.email", "test@test.com")
-	cmdCfgEmail.Dir = mainRepo
+	cmdCfgEmail := cleanGitCmd(mainRepo, "config", "user.email", "test@test.com")
 	_ = cmdCfgEmail.Run()
 
-	cmdCfgName := exec.Command("git", "config", "user.name", "test")
-	cmdCfgName.Dir = mainRepo
+	cmdCfgName := cleanGitCmd(mainRepo, "config", "user.name", "test")
 	_ = cmdCfgName.Run()
 
 	dummyFile := filepath.Join(mainRepo, "init.txt")
 	_ = os.WriteFile(dummyFile, []byte("init"), 0644)
-	cmdAdd := exec.Command("git", "add", "init.txt")
-	cmdAdd.Dir = mainRepo
+	cmdAdd := cleanGitCmd(mainRepo, "add", "init.txt")
 	_ = cmdAdd.Run()
 
-	cmdCommit := exec.Command("git", "commit", "-m", "init")
-	cmdCommit.Dir = mainRepo
+	cmdCommit := cleanGitCmd(mainRepo, "commit", "-m", "init")
 	_ = cmdCommit.Run()
 
 	// 创建 git worktree
-	cmdWt := exec.Command("git", "worktree", "add", wtRepo, "-b", "feature")
-	cmdWt.Dir = mainRepo
+	cmdWt := cleanGitCmd(mainRepo, "worktree", "add", wtRepo, "-b", "feature")
 	if out, err := cmdWt.CombinedOutput(); err != nil {
 		t.Fatalf("创建 git worktree 失败: %v, 输出: %s", err, string(out))
 	}
