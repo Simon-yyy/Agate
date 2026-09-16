@@ -4,7 +4,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#跨平台兼容)
+[![Platform](<https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey>)](#跨平台兼容)
 
 ---
 
@@ -18,18 +18,17 @@
 
 **`agate`（Agent Gate / 玛瑙）** 就是为了解决这些麻烦写的。它是一个零依赖的单文件 Go 程序，用来充当工程护栏：**同一套规约自动分发、AI 私有文件在本地悄悄屏蔽、代码改动前强制出方案、改动后必须跑通自检才准交付。**
 
-
 ---
 
 ## ⚡ 核心能力矩阵
 
-| 模块 | 核心功能 | 解决痛点 | 运作机制 |
-| :--- | :--- | :--- | :--- |
-| **`agate init`** | 一键工程护栏挂载 | 消除多工具配置分裂 | 自动分发核心规约至各 Agent 目标目录，初始化架构地图 `AGENTS.md` 骨架，挂载本地防爆仓与 Git 门禁。 |
-| **`agate isolate`** | Git 私有隔离治理 | 杜绝团队公共仓库污染 | 基于 `.git/info/exclude` 本地原生机制，隐形屏蔽 AI 私有配置，对团队无感且零侵入。 |
-| **`agate verify`** | 闭环自检物证交付 | 杜绝 AI 伪交付与死循环 | 优先调度项目内 `verify.sh`/`verify.cmd`；无自定义脚本时执行完备性扫描，输出 `[PASS]` 物证。 |
-| **`agate scan`** | 智能技术拓扑推导 | 自动化丰富地图文档 | 智能扫描项目配置（Maven/npm/Go/Python 与端口），支持 `--write` 自动回填 `AGENTS.md`。 |
-| **`agate hook`** | Git 提交硬拦截 | 防止未验证代码入库 | 自动将本地 `pre-commit` 门禁挂接至 `agate verify`，测试失败瞬间终止 `git commit`。 |
+| 模块                        | 核心功能         | 解决痛点               | 运作机制                                                                                           |
+| :-------------------------- | :--------------- | :--------------------- | :------------------------------------------------------------------------------------------------- |
+| **`agate init`**    | 一键工程护栏挂载 | 消除多工具配置分裂     | 自动分发核心规约至各 Agent 目标目录，初始化架构地图`AGENTS.md` 骨架，挂载本地防爆仓与 Git 门禁。 |
+| **`agate isolate`** | Git 私有隔离治理 | 杜绝团队公共仓库污染   | 基于`.git/info/exclude` 本地原生机制，隐形屏蔽 AI 私有配置，对团队无感且零侵入。                 |
+| **`agate verify`**  | 闭环自检物证交付 | 杜绝 AI 伪交付与死循环 | 优先调度项目内`verify.sh`/`verify.cmd`；无自定义脚本时执行完备性扫描，输出 `[PASS]` 物证。   |
+| **`agate scan`**    | 智能技术拓扑推导 | 自动化丰富地图文档     | 智能扫描项目配置（Maven/npm/Go/Python 与端口），支持 `--write` 自动回填 `AGENTS.md` 与 `contexts/context.md`。 |
+| **`agate hook`**    | Git 提交硬拦截   | 防止未验证代码入库     | 自动将本地`pre-commit` 门禁挂接至 `agate verify`，测试失败瞬间终止 `git commit`。            |
 
 ---
 
@@ -38,11 +37,14 @@
 ### 1. 安装方式
 
 #### 预编译单二进制（推荐）
+
 直接从 [GitHub Releases](https://github.com/Simon-yyy/Agate/releases) 下载对应操作系统的免安装单二进制文件，放入系统 `PATH` 目录即可开箱即用：
+
 - **Linux / macOS**: 放置于 `/usr/local/bin/agate` 并执行 `chmod +x /usr/local/bin/agate`
 - **Windows**: 放置于任一已配置在系统 `PATH` 的目录（例如 `%USERPROFILE%\bin\agate.exe` 或自定义工具箱目录）
 
 #### 源码构建（离线零依赖）
+
 ```bash
 git clone https://github.com/Simon-yyy/Agate.git
 cd Agate
@@ -67,6 +69,7 @@ agate verify
 ```
 
 执行 `agate init -t cursor`（或智能探测）后，终端输出清晰指引：
+
 ```text
 [agate] 正在为工程 [my-project] 挂载防护体系...
   [+] 已生成 .ignore (索引防爆仓)
@@ -103,12 +106,12 @@ graph TD
 2. **自检物证（拿结果交差，两振熔断）**：改完代码后必须在后台跑一遍自检，拿到绿色的 `[PASS]` 退出码才算交付；同一问题修复两次未果强制停手，交还主控权，拒绝无效死循环。
 3. **Git 隐形隔离（本地静默屏蔽，提交强卡口）**：把 AI 相关的各种私有配置统一写入本地 `.git/info/exclude`，不碰团队共享的 `.gitignore`；同时在 `pre-commit` 挂上自检，未验证的代码直接被拦在门外。
 
-
 ---
 
 ## 🗺️ 架构资产（3-Hop 寻路）
 
 `agate` 提倡跨 Agent 共享的架构认知资产：
+
 - **`AGENTS.md`**：模块拓扑与服务端口矩阵，帮助 AI 快速建立全景空间认知；
 - **`contexts/context.md`**：工程技术契约与核心规则基线；
 - **`3-Hop 寻路协议`**：AI 检索代码必须遵循：`AGENTS.md -> contexts/context.md -> 目标模块源码`，严禁全仓盲目扫描引发上下文爆仓。

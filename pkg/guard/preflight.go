@@ -158,6 +158,9 @@ func RunPreflightAudit(root string) *AuditResult {
 	// 6. 检查 vendor 目录纯净度
 	auditVendorCleanliness(root, res)
 
+	// 7. 检查 3-Hop 双地图完备性 (AGENTS.md 与 contexts/context.md 架构契约)
+	auditArchitectureMaps(root, res)
+
 	// 若当前目录非 Git 仓库，不存在版本库提交风险，将依赖 Git 隔离机制的违规降级为 WARN（平滑降级原则）
 	if !gitCtx.isGitRepo {
 		for i := range res.Violations {
@@ -557,4 +560,43 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 		}
 		return nil
 	})
+}
+
+// auditArchitectureMaps 检查 3-Hop 寻路地图是否完整（若工程已挂载护栏，双地图必须成对完备）
+func auditArchitectureMaps(root string, res *AuditResult) {
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	contextPath := filepath.Join(root, "contexts", "context.md")
+
+	hasAgents := false
+	if fi, err := os.Stat(agentsPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+		hasAgents = true
+	}
+
+	hasContext := false
+	if fi, err := os.Stat(contextPath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+		hasContext = true
+	}
+
+	// 若工程未挂载 agate 护栏且两个地图均不存在，不做强制拦截（平滑兼容普通工程）
+	if !hasAgents && !hasContext {
+		return
+	}
+
+	if hasAgents && !hasContext {
+		res.Violations = append(res.Violations, Violation{
+			Level:      "ERROR",
+			Category:   "架构地图缺失",
+			File:       filepath.Join("contexts", "context.md"),
+			Message:    "检测到 AGENTS.md 但缺失 contexts/context.md 技术契约地图，3-Hop 寻路链条断裂",
+			Suggestion: "执行 `agate init` 补齐 contexts/context.md 或手动创建",
+		})
+	} else if !hasAgents && hasContext {
+		res.Violations = append(res.Violations, Violation{
+			Level:      "ERROR",
+			Category:   "架构地图缺失",
+			File:       "AGENTS.md",
+			Message:    "检测到 contexts/context.md 但缺失 AGENTS.md 模块地图，3-Hop 寻路链条断裂",
+			Suggestion: "执行 `agate init` 补齐 AGENTS.md 架构地图或手动创建",
+		})
+	}
 }

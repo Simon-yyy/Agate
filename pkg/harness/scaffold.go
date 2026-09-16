@@ -56,20 +56,7 @@ func EnsureContext() (bool, error) {
 		return false, nil
 	}
 
-	defaultContent := `# 项目工程上下文 (Operational Context)
-
-## 一、 技术栈与运行环境
-- **基础运行环境**: 运行环境与主要版本 (如 JDK 17 / Node.js 20 / Go 1.22)
-- **核心框架**: 补充框架名称与关键组件版本
-
----
-
-## 二、 核心业务流与规则基线
-- 核心业务流程：请求路由 -> 权限/校验中间件 -> 业务处理 -> 持久化
-- 异常与返回体规范：标准统一返回体格式与错误码映射
-`
-
-	if err := WriteFileAtomic(target, []byte(defaultContent), 0644); err != nil {
+	if err := WriteFileAtomic(target, templates.DefaultContextTpl, 0644); err != nil {
 		return false, fmt.Errorf("写入 contexts/context.md 失败: %w", err)
 	}
 	return true, nil

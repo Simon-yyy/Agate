@@ -317,4 +317,40 @@ func TestPath(t *testing.T) {
 	}
 }
 
+func TestArchitectureMapsCompleteness(t *testing.T) {
+	// Case 1: 缺少 contexts/context.md
+	tempDir1, err := os.MkdirTemp("", "agate-guard-map1-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir1)
+
+	_ = os.WriteFile(filepath.Join(tempDir1, "AGENTS.md"), []byte("# AGENTS"), 0644)
+	res1 := RunPreflightAudit(tempDir1)
+	if !res1.HasErrors() {
+		t.Errorf("仅有 AGENTS.md 时预期报错缺失 contexts/context.md，但未报错")
+	}
+
+	// Case 2: 缺少 AGENTS.md
+	tempDir2, err := os.MkdirTemp("", "agate-guard-map2-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir2)
+
+	_ = os.MkdirAll(filepath.Join(tempDir2, "contexts"), 0755)
+	_ = os.WriteFile(filepath.Join(tempDir2, "contexts", "context.md"), []byte("# Context"), 0644)
+	res2 := RunPreflightAudit(tempDir2)
+	if !res2.HasErrors() {
+		t.Errorf("仅有 contexts/context.md 时预期报错缺失 AGENTS.md，但未报错")
+	}
+
+	// Case 3: 双地图齐备
+	_ = os.WriteFile(filepath.Join(tempDir2, "AGENTS.md"), []byte("# AGENTS"), 0644)
+	res3 := RunPreflightAudit(tempDir2)
+	if res3.HasErrors() {
+		t.Errorf("双地图齐备时预期通过，但报错: %v", res3.Violations)
+	}
+}
+
 

@@ -10,3 +10,6 @@ var DefaultIgnore []byte
 
 //go:embed agents.tpl
 var DefaultAgentsTpl []byte
+
+//go:embed context.tpl
+var DefaultContextTpl []byte
