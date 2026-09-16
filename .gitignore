@@ -14,8 +14,9 @@ agate.exe
 *.out
 
 # Local build & GoReleaser artifacts
-bin/**/*.exe
-bin/*.exe
+bin/*
+!bin/.gitkeep
+bin/**/*
 dist/
 
 # OS / Editor files
