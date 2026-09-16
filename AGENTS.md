@@ -11,6 +11,7 @@
 ## 二、 关键入口与常用命令
 
 ### 1. 编译构建与归档
+- **版本升级与归档**：`./scripts/bump.sh [patch|minor|major]`（支持加 `--release` 自动推送到 GitHub 发布）
 - **本地开发构建**：`go build -mod=vendor -o agate main.go`
 - **跨平台全量归档**：`./scripts/archive.sh`（生成 Windows/Linux/macOS 产物至 `bin/v<version>/`）
 - **Windows 本地归档**：`.\scripts\archive.cmd` (调度 `scripts/archive.ps1`)
