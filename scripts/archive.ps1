@@ -21,12 +21,8 @@ foreach ($line in $lines) {
     }
 }
 
-$winDir = "bin/windows"
 $winVerDir = "bin/v$version/windows"
 
-if (!(Test-Path $winDir)) {
-    New-Item -ItemType Directory -Force -Path $winDir | Out-Null
-}
 if (!(Test-Path $winVerDir)) {
     New-Item -ItemType Directory -Force -Path $winVerDir | Out-Null
 }
@@ -35,11 +31,7 @@ Write-Host "=== [Agate Windows 版本构建与归档] ===" -ForegroundColor Cyan
 Write-Host "正在构建版本: v$version ..." -ForegroundColor Gray
 
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate_v${version}_windows_amd64.exe" main.go
-
 Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winVerDir/agate.exe"
-Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winDir/agate_windows_amd64.exe"
-Copy-Item -Force "$winVerDir/agate_v${version}_windows_amd64.exe" "$winDir/agate.exe"
 
 Write-Host "[+] 成功归档至: $winVerDir/agate.exe" -ForegroundColor Green
-Write-Host "[+] 同步更新至: $winDir/agate.exe" -ForegroundColor Green
 Write-Host "=== 归档完成 ===" -ForegroundColor Cyan
