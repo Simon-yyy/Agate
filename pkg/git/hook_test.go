@@ -67,6 +67,9 @@ func TestInstallAndUninstallHooks(t *testing.T) {
 	if !strings.Contains(contentStr, `"$ALLOW_AUTOMATED_PUSH" = "1"`) {
 		t.Errorf("pre-push 脚本未包含严格的正向白名单授权校验逻辑，实际内容:\n%s", contentStr)
 	}
+	if !strings.Contains(contentStr, "$CODEX_SESSION_ID") || !strings.Contains(contentStr, "$CODEX_THREAD_ID") {
+		t.Errorf("pre-push 脚本未包含 Codex 自动化环境指纹")
+	}
 
 	// 执行卸载
 	if err := UninstallHooks(); err != nil {

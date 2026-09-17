@@ -23,7 +23,7 @@ var initCmd = &cobra.Command{
 	Long: `自动化执行工程护栏初始化：
 - 生成 .ignore 索引过滤，避免文件检索爆仓；
 - 配置 .git/info/exclude 私有追踪隔离，防止 AI 元数据污染 Git 提交；
-- 分发单一事实源规约至 Cursor / Antigravity / Claude / Windsurf 等目标；
+- 分发单一事实源规约至 Codex / Cursor / Antigravity / Claude / Windsurf 等目标；
 - 生成 AGENTS.md 模块地图与 contexts/context.md 契约骨架；
 - 挂载本地 Git pre-commit 闭环门禁。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,7 +53,20 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		// 3. 挂载规约 (智能按需探测或按指定分发)
+		// 3. 先生成 Codex 会读取的架构地图与技术契约，随后再写入受管规则区块
+		if created, err := harness.EnsureAgentsMap(projectName); err != nil {
+			return err
+		} else if created {
+			fmt.Println("  \033[92m[+] 已生成 AGENTS.md 骨架\033[0m")
+		}
+
+		if created, err := harness.EnsureContext(); err != nil {
+			return err
+		} else if created {
+			fmt.Println("  \033[92m[+] 已生成 contexts/context.md 基线\033[0m")
+		}
+
+		// 4. 挂载规约 (智能按需探测或按指定分发)
 		targets, err := adapter.ResolveTargets(flagTargets, ".")
 		if err != nil {
 			return err
@@ -72,21 +85,7 @@ var initCmd = &cobra.Command{
 			return err
 		}
 
-		// 4. 生成架构地图骨架 AGENTS.md
-		if created, err := harness.EnsureAgentsMap(projectName); err != nil {
-			return err
-		} else if created {
-			fmt.Println("  \033[92m[+] 已生成 AGENTS.md 骨架\033[0m")
-		}
-
-		// 5. 生成技术上下文基线 contexts/context.md
-		if created, err := harness.EnsureContext(); err != nil {
-			return err
-		} else if created {
-			fmt.Println("  \033[92m[+] 已生成 contexts/context.md 基线\033[0m")
-		}
-
-		// 6. 生成私有协同看板与记忆 (已由 exclude 隐形隔离，不污染 Git)
+		// 5. 生成私有协同看板与记忆 (已由 exclude 隐形隔离，不污染 Git)
 		if created, err := harness.EnsureTaskBoard(); err != nil {
 			return err
 		} else if created {
@@ -99,7 +98,7 @@ var initCmd = &cobra.Command{
 			fmt.Println("  \033[92m[+] 已生成 MEMORY.md (跨会话协同记忆)\033[0m")
 		}
 
-		// 7. 安装本地 Git 物理双重门禁
+		// 6. 安装本地 Git 物理双重门禁
 		var partialWarnings []string
 		if git.IsGitRepo() && !flagNoHook {
 			if err := git.InstallHooks(); err != nil {
@@ -127,7 +126,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().StringSliceVarP(&flagTargets, "targets", "t", nil, "指定要分发的 Agent 目标，可选：antigravity,cursor,claude,windsurf")
+	initCmd.Flags().StringSliceVarP(&flagTargets, "targets", "t", nil, "指定要分发的 Agent 目标，可选：codex,antigravity,cursor,claude,windsurf,all")
 	initCmd.Flags().BoolVar(&flagNoHook, "no-hook", false, "跳过 Git pre-commit 钩子的自动挂载")
 	rootCmd.AddCommand(initCmd)
 }

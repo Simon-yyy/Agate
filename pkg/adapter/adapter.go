@@ -8,17 +8,19 @@ import (
 	"strings"
 
 	"agate/internal/templates"
+	agentinfo "agate/pkg/agent"
 	"agate/pkg/harness"
 )
 
 // AgentTarget 目标 Agent 类型
-type AgentTarget string
+type AgentTarget = agentinfo.Kind
 
 const (
-	TargetAntigravity AgentTarget = "antigravity"
-	TargetCursor      AgentTarget = "cursor"
-	TargetClaude      AgentTarget = "claude"
-	TargetWindsurf    AgentTarget = "windsurf"
+	TargetCodex       AgentTarget = agentinfo.Codex
+	TargetAntigravity AgentTarget = agentinfo.Antigravity
+	TargetCursor      AgentTarget = agentinfo.Cursor
+	TargetClaude      AgentTarget = agentinfo.Claude
+	TargetWindsurf    AgentTarget = agentinfo.Windsurf
 )
 
 // TargetMapping 映射 Agent 至对应的规约文件物理路径
@@ -62,8 +64,10 @@ func DetectExistingTargets(root string) []AgentTarget {
 var SupportedTargets = map[string]AgentTarget{
 	"cursor":      TargetCursor,
 	"antigravity": TargetAntigravity,
+	"gemini":      TargetAntigravity,
 	"claude":      TargetClaude,
 	"windsurf":    TargetWindsurf,
+	"codex":       TargetCodex,
 }
 
 // ResolveTargets 解析最终待挂载的目标 Agent 清单（包含合法性校验与去重）
@@ -84,7 +88,7 @@ func ResolveTargets(explicitTargets []string, root string) ([]AgentTarget, error
 			}
 			target, ok := SupportedTargets[clean]
 			if !ok {
-				return nil, fmt.Errorf("不支持的 Agent 目标: '%s' (有效选项: cursor, antigravity, claude, windsurf, all)", t)
+				return nil, fmt.Errorf("不支持的 Agent 目标: '%s' (有效选项: cursor, antigravity, claude, windsurf, codex, all)", t)
 			}
 			if !seen[target] {
 				seen[target] = true
@@ -93,7 +97,7 @@ func ResolveTargets(explicitTargets []string, root string) ([]AgentTarget, error
 		}
 
 		if hasAll {
-			return []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf}, nil
+			return []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf, TargetCodex}, nil
 		}
 
 		if len(targets) > 0 {
@@ -127,6 +131,14 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 	}
 
 	for _, target := range targets {
+		if target == TargetCodex {
+			if err := updateCodexRules("AGENTS.md", content); err != nil {
+				return err
+			}
+			fmt.Printf("  \033[92m[+] 已更新 %-11s 规约受管区块 -> AGENTS.md\033[0m\n", target)
+			continue
+		}
+
 		destPath, ok := TargetMapping[target]
 		if !ok {
 			continue
@@ -153,6 +165,49 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 			return fmt.Errorf("挂载 %s 规约失败 [%s]: %w", target, destPath, err)
 		}
 		fmt.Printf("  \033[92m[+] 已挂载 %-11s 规约 -> %s\033[0m\n", target, destPath)
+	}
+	return nil
+}
+
+const (
+	codexRulesStart = "<!-- agate:codex-rules:start -->"
+	codexRulesEnd   = "<!-- agate:codex-rules:end -->"
+)
+
+// updateCodexRules 仅更新 AGENTS.md 中 Agate 受管区块，保留用户架构地图。
+func updateCodexRules(path string, rules []byte) error {
+	existingBytes, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("读取 Codex 指令文件失败 [%s]: %w", path, err)
+	}
+	existing := string(existingBytes)
+	newline := "\n"
+	if strings.Contains(existing, "\r\n") {
+		newline = "\r\n"
+	}
+	body := strings.TrimSpace(string(rules))
+	block := codexRulesStart + newline + "## Agate Codex Guardrails" + newline + body + newline + codexRulesEnd
+
+	start := strings.Index(existing, codexRulesStart)
+	end := strings.Index(existing, codexRulesEnd)
+	var updated string
+	switch {
+	case start >= 0 && end > start:
+		end += len(codexRulesEnd)
+		updated = existing[:start] + block + existing[end:]
+	case start >= 0 || end >= 0:
+		return fmt.Errorf("Codex 指令受管区块标记不完整 [%s]", path)
+	case strings.TrimSpace(existing) == "":
+		updated = block + newline
+	default:
+		updated = strings.TrimRight(existing, "\r\n") + newline + newline + block + newline
+	}
+
+	if updated == existing {
+		return nil
+	}
+	if err := harness.WriteFileAtomic(path, []byte(updated), 0644); err != nil {
+		return fmt.Errorf("写入 Codex 指令文件失败 [%s]: %w", path, err)
 	}
 	return nil
 }

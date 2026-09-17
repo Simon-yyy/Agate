@@ -12,25 +12,67 @@ if ($env:GO_BIN -and (Test-Path $env:GO_BIN)) {
 }
 
 # 2. 解析 cmd/root.go 中的版本号
-$version = "0.1.0"
+$version = "0.2.1"
 $lines = Get-Content -Path "cmd/root.go"
 foreach ($line in $lines) {
-    if ($line -match 'version\s*=\s*"([^"]+)"') {
-        $version = $matches[1]
-        break
+    if ($line.Contains("version = ")) {
+        $start = $line.IndexOf('"') + 1
+        $end = $line.LastIndexOf('"')
+        if ($start -gt 0 -and $end -gt $start) {
+            $version = $line.Substring($start, $end - $start)
+            break
+        }
     }
 }
 
-$winVerDir = "bin/v$version/windows"
+$baseDir = "bin/v$version"
+$winVerDir = "$baseDir/windows"
+$linuxVerDir = "$baseDir/linux"
+$darwinVerDir = "$baseDir/darwin"
 
-if (!(Test-Path $winVerDir)) {
-    New-Item -ItemType Directory -Force -Path $winVerDir | Out-Null
-}
+if (!(Test-Path $winVerDir)) { New-Item -ItemType Directory -Force -Path $winVerDir | Out-Null }
+if (!(Test-Path $linuxVerDir)) { New-Item -ItemType Directory -Force -Path $linuxVerDir | Out-Null }
+if (!(Test-Path $darwinVerDir)) { New-Item -ItemType Directory -Force -Path $darwinVerDir | Out-Null }
 
-Write-Host "=== [Agate Windows 版本构建与归档] ===" -ForegroundColor Cyan
-Write-Host "正在构建版本: v$version ..." -ForegroundColor Gray
+Write-Host "=== [Agate 跨平台版本构建与归档] ===" -ForegroundColor Cyan
+Write-Host "归档目标: $baseDir ..." -ForegroundColor Gray
 
+# 1. Windows amd64
+Write-Host "[1/3] 构建 Windows amd64 ($winVerDir/agate.exe)..." -ForegroundColor Gray
+$env:CGO_ENABLED = "0"
+$env:GOOS = "windows"
+$env:GOARCH = "amd64"
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate.exe" main.go
 
-Write-Host "[+] 成功归档至: $winVerDir/agate.exe" -ForegroundColor Green
+# 2. Linux amd64
+Write-Host "[2/3] 构建 Linux amd64 ($linuxVerDir/agate)..." -ForegroundColor Gray
+$env:CGO_ENABLED = "0"
+$env:GOOS = "linux"
+$env:GOARCH = "amd64"
+& $goCmd build -mod=vendor -ldflags="-s -w" -o "$linuxVerDir/agate" main.go
+
+# 3. macOS Intel & ARM64
+Write-Host "[3/3] 构建 macOS Intel & ARM64 ($darwinVerDir/)..." -ForegroundColor Gray
+$env:CGO_ENABLED = "0"
+$env:GOOS = "darwin"
+$env:GOARCH = "amd64"
+& $goCmd build -mod=vendor -ldflags="-s -w" -o "$darwinVerDir/agate_amd64" main.go
+
+$env:CGO_ENABLED = "0"
+$env:GOOS = "darwin"
+$env:GOARCH = "arm64"
+& $goCmd build -mod=vendor -ldflags="-s -w" -o "$darwinVerDir/agate_arm64" main.go
+
+# 清理环境变量
+Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue
+Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
+Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
+
+# 同步刷新根目录 bin/agate.exe
+Copy-Item -Path "$winVerDir/agate.exe" -Destination "bin/agate.exe" -Force
+
+Write-Host "`n[+] 成功归档各平台产物:" -ForegroundColor Green
+Write-Host "  - Windows: $winVerDir/agate.exe" -ForegroundColor Gray
+Write-Host "  - Linux:   $linuxVerDir/agate" -ForegroundColor Gray
+Write-Host "  - macOS:   $darwinVerDir/ (agate_amd64 / agate_arm64)" -ForegroundColor Gray
 Write-Host "=== 归档完成 ===" -ForegroundColor Cyan

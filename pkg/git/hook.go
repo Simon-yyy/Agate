@@ -44,7 +44,7 @@ fi
 
 # 增加 Agent/CI 自动化环境指纹检测 (防 PTY 伪终端伪造 TTY 绕过 RSK-001)
 is_agent_env=0
-if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$AI_AGENT" ]; then
+if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$CODEX_CI" ] || [ -n "$CODEX_SESSION_ID" ] || [ -n "$CODEX_THREAD_ID" ] || [ -n "$AI_AGENT" ]; then
     is_agent_env=1
 fi
 

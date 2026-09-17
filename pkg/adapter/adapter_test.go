@@ -3,6 +3,7 @@ package adapter
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,8 +69,8 @@ func TestResolveTargets(t *testing.T) {
 
 	// 2. 显式指定 all
 	resAll, err := ResolveTargets([]string{"all"}, tempDir)
-	if err != nil || len(resAll) != 4 {
-		t.Errorf("指定 all 预期 4 个目标，得到: %v, err: %v", resAll, err)
+	if err != nil || len(resAll) != 5 || resAll[4] != TargetCodex {
+		t.Errorf("指定 all 预期包含 5 个目标及 codex，得到: %v, err: %v", resAll, err)
 	}
 
 	// 3. 空白目录默认推荐 2 个主流目标
@@ -99,6 +100,55 @@ func TestResolveTargets(t *testing.T) {
 	if len(resDeduplicated) != 2 {
 		t.Errorf("重复输入预期去重为 2 个目标，实际: %d (%v)", len(resDeduplicated), resDeduplicated)
 	}
+
+	resCodex, err := ResolveTargets([]string{"codex"}, tempDir)
+	if err != nil || len(resCodex) != 1 || resCodex[0] != TargetCodex {
+		t.Errorf("显式指定 codex 失败，得到: %v, err: %v", resCodex, err)
+	}
+}
+
+func TestDistributeCodexRulesPreservesAgentsMap(t *testing.T) {
+	tempDir := t.TempDir()
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+
+	original := "# Project Map\n\n## Modules\n- cmd/\n"
+	if err := os.WriteFile("AGENTS.md", []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rules := []byte("- Run `agate verify` after changes.")
+	if err := DistributeRules(rules, []AgentTarget{TargetCodex}); err != nil {
+		t.Fatalf("Codex 规则分发失败: %v", err)
+	}
+	first, err := os.ReadFile("AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) == original || !containsAll(string(first), []string{"# Project Map", codexRulesStart, string(rules), codexRulesEnd}) {
+		t.Fatalf("Codex 分发未保留地图或缺少受管区块: %s", first)
+	}
+	if err := DistributeRules(rules, []AgentTarget{TargetCodex}); err != nil {
+		t.Fatalf("Codex 规则重复分发失败: %v", err)
+	}
+	second, _ := os.ReadFile("AGENTS.md")
+	if string(first) != string(second) {
+		t.Fatalf("重复分发不幂等")
+	}
+}
+
+func containsAll(value string, parts []string) bool {
+	for _, part := range parts {
+		if !strings.Contains(value, part) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestDistributeRulesBackupProtection(t *testing.T) {

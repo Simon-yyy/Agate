@@ -14,7 +14,7 @@
 
 在日常使用 Cursor、Antigravity (Gemini)、Claude Code 或 Windsurf 等 AI 辅助编程时，开发者常陷入以下三大工程困境：
 
-1. **规约生态分裂与漂移**：每个 AI 工具各自维护私有配置文件（如 `.cursorrules`、`.gemini/GEMINI.md`、`CLAUDE.md`、`.windsurfrules`）。团队换工具或多人协作时必须重复教导，配置分散且容易各处漂移。
+1. **规约生态分裂与漂移**：每个 AI 工具各自维护私有配置文件（如 `AGENTS.md`、`.cursorrules`、`.gemini/GEMINI.md`、`CLAUDE.md`、`.windsurfrules`）。团队换工具或多人协作时必须重复教导，配置分散且容易各处漂移。
 2. **私有状态污染团队 Git**：AI 生成的思考缓存、临时任务清单（`TASK.md`）、记忆文件以及编辑器私有配置，极易被 `git add .` 误提交入库，弄脏公共提交树；直接改团队 `.gitignore` 又会产生强侵入性。
 3. **盲目动手与无效死循环**：需求未经对齐，AI 就直接大面积覆写业务代码；修改报错后又盲目乱试、陷入死循环试错，甚至将无法通过编译或缺少测试的半成品直接交付给开发者。
 
@@ -87,6 +87,7 @@ agate init
 
 # 或按需为特定 Agent 定向挂载（支持组合）：
 agate init -t cursor          # 仅生成 .cursorrules
+agate init -t codex           # 写入 Codex 原生 AGENTS.md 规约区块
 agate init -t antigravity     # 针对 Antigravity (.gemini/GEMINI.md)
 agate init -t claude          # 仅针对 Claude Code (CLAUDE.md)
 agate init -t windsurf        # 仅针对 Windsurf (.windsurfrules)
@@ -171,7 +172,7 @@ agate verify --report
 
 ### 7. 跨 Agent 任务接力与记忆治理 (Agate Relay)
 
-针对多 Agent 协作或在不同开发工具（如 Cursor、Antigravity、Claude Code、Windsurf）之间频繁切换的场景，Agate 提供跨工具的任务接力中枢与认知防线：
+针对多 Agent 协作或在不同开发工具（如 Codex、Cursor、Antigravity、Claude Code、Windsurf）之间频繁切换的场景，Agate 提供跨工具的任务接力中枢与认知防线：
 
 ```bash
 # 查看当前任务看板、执行状态、持锁人、交付物证与最近流转历史

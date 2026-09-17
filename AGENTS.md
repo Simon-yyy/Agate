@@ -22,7 +22,7 @@
 - **单元测试套件**：`go test -mod=vendor -v ./...`
 
 ### 3. 工程初始化与治理
-- **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t cursor,antigravity`）
+- **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t codex,cursor,antigravity`）
 - **技术拓扑回填**：`agate scan --write`（自动探测技术栈与端口，同步回填 AGENTS.md 与 contexts/context.md）
 - **Git 私有隔离**：`agate isolate`（静默配置 `.git/info/exclude`）
 - **门禁生命周期**：`agate hook [install|uninstall|status]`
@@ -56,7 +56,7 @@
 
 ### 2. 规约适配与分发 (`pkg/adapter/`)
 - [pkg/adapter/adapter.go](pkg/adapter/adapter.go)：多 Agent 目标嗅探器与规约分发器。
-  - 支持目标：Cursor (`.cursorrules`)、Antigravity (`.gemini/GEMINI.md`)、Claude Code (`CLAUDE.md`)、Windsurf (`.windsurfrules`)。
+  - 支持目标：Codex (`AGENTS.md` 受管区块)、Cursor (`.cursorrules`)、Antigravity (`.gemini/GEMINI.md`)、Claude Code (`CLAUDE.md`)、Windsurf (`.windsurfrules`)。
   - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源。
 
 ### 3. Git 治理与安全门禁 (`pkg/git/`)

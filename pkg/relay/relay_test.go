@@ -108,6 +108,11 @@ func TestDetectCurrentAgentPrecision(t *testing.T) {
 	t.Setenv("CLAUDE_CODE", "")
 	t.Setenv("CLAUDE_AGENT", "")
 	t.Setenv("WINDSURF_AGENT", "")
+	t.Setenv("CODEX_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("CODEX_VERSION", "")
+	t.Setenv("CODEX_CI", "")
+	t.Setenv("CODEX_SHELL", "")
 	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("VSCODE_GIT_IPC_HANDLE", "")
 
@@ -134,6 +139,12 @@ func TestDetectCurrentAgentPrecision(t *testing.T) {
 	t.Setenv("ANTIGRAVITY_AGENT", "1")
 	if a := DetectCurrentAgent(tempDir); a != "antigravity" {
 		t.Errorf("ANTIGRAVITY_AGENT=1 预期推断为 antigravity，实际为: %s", a)
+	}
+
+	t.Setenv("ANTIGRAVITY_AGENT", "")
+	t.Setenv("CODEX_SESSION_ID", "session-1")
+	if a := DetectCurrentAgent(tempDir); a != "codex" {
+		t.Errorf("CODEX_SESSION_ID 存在时预期推断为 codex，实际为: %s", a)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agate/internal/templates"
+	agentinfo "agate/pkg/agent"
 	"agate/pkg/git"
 	"agate/pkg/guard"
 	"agate/pkg/harness"
@@ -52,20 +53,8 @@ func DetectCurrentAgent(rootDir string) string {
 	gitIpc := strings.ToLower(os.Getenv("VSCODE_GIT_IPC_HANDLE"))
 
 	// 1. 环境变量与活动终端优先探测
-	if os.Getenv("CURSOR_AGENT") != "" || os.Getenv("CURSOR_VERSION") != "" ||
-		strings.Contains(termProgram, "cursor") || strings.Contains(gitIpc, "cursor") {
-		return "cursor"
-	}
-	if os.Getenv("ANTIGRAVITY_AGENT") != "" || os.Getenv("GEMINI_AGENT") != "" ||
-		os.Getenv("ANTIGRAVITY_IDE") != "" || strings.Contains(termProgram, "antigravity") {
-		return "antigravity"
-	}
-	if os.Getenv("CLAUDE_CODE") != "" || os.Getenv("CLAUDE_AGENT") != "" ||
-		strings.Contains(termProgram, "claude") {
-		return "claude"
-	}
-	if os.Getenv("WINDSURF_AGENT") != "" || strings.Contains(termProgram, "windsurf") {
-		return "windsurf"
+	if detected, ok := agentinfo.DetectEnvironment(os.Getenv, termProgram, gitIpc); ok {
+		return string(detected)
 	}
 
 	// 2. 独占式规约文件标记探测

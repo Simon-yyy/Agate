@@ -48,7 +48,7 @@ switch ($Type.ToLower()) {
         if ($cleanVer -match '^\d+\.\d+\.\d+') {
             $newVersion = $cleanVer
         } else {
-            Write-Error "无效的版本升级类型: $Type (支持: patch, minor, major 或指定版本号如 0.2.0)"
+            Write-Error "无效的版本升级类型: $Type (支持: patch, minor, major 或指定版本号如 0.2.1)"
         }
     }
 }
@@ -59,15 +59,15 @@ Write-Host "升级目标: v$newVersion" -ForegroundColor Green
 
 # 3. 回填更新 cmd/root.go
 $content = Get-Content -Path $rootFile -Raw
-$newContent = $content -replace "version = `"$currentVersion`"", "version = `"$newVersion`""
+$newContent = $content.Replace("version = `"$currentVersion`"", "version = `"$newVersion`"")
 Set-Content -Path $rootFile -Value $newContent -NoNewline
 Write-Host "[+] 已更新 $rootFile 版本号至 $newVersion" -ForegroundColor Green
 
-# 4. 执行构建归档
-Write-Host "[+] 正在触发 Windows 平台构建与归档..." -ForegroundColor Cyan
+# 4. 执行全平台构建归档
+Write-Host "[+] 正在触发全平台构建与安装包归档..." -ForegroundColor Cyan
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/archive.ps1"
 
-Write-Host "`n[✓] 本地版本升级完毕: v$newVersion" -ForegroundColor Green
+Write-Host "`n[✓] 本地版本升级与归档完毕: v$newVersion" -ForegroundColor Green
 
 if ($Release) {
     Write-Host "[+] 正在提交并推送 Release 标签 (v$newVersion)..." -ForegroundColor Cyan
@@ -77,11 +77,13 @@ if ($Release) {
     $env:ALLOW_AUTOMATED_PUSH = "1"
     git push origin main
     git push origin "v$newVersion"
+    Remove-Item Env:\ALLOW_AUTOMATED_PUSH -ErrorAction SilentlyContinue
     Write-Host "[✓] Release 标签 v$newVersion 已推送，GitHub Actions 已自动触发云端发布！" -ForegroundColor Green
 } else {
     Write-Host "💡 提示：如需将此版本自动发布至 GitHub Releases，可执行：" -ForegroundColor Yellow
-    Write-Host "   git add cmd/root.go; git commit -m `"chore(release): bump version to v$newVersion`"" -ForegroundColor Gray
-    Write-Host "   git tag -a `"v$newVersion`" -m `"release: v$newVersion`"" -ForegroundColor Gray
-    Write-Host "   `$env:ALLOW_AUTOMATED_PUSH=`"1`"; git push origin main; git push origin `"v$newVersion`"" -ForegroundColor Gray
+    Write-Host "   git add cmd/root.go scripts/" -ForegroundColor Gray
+    Write-Host "   git commit -m 'chore(release): bump version to v$newVersion'" -ForegroundColor Gray
+    Write-Host "   git tag -a 'v$newVersion' -m 'release: v$newVersion'" -ForegroundColor Gray
+    Write-Host "   `$env:ALLOW_AUTOMATED_PUSH='1'; git push origin main; git push origin 'v$newVersion'" -ForegroundColor Gray
     Write-Host "   或下次直接运行: .\scripts\bump.cmd -Release 自动完成全流程发布。" -ForegroundColor Yellow
 }
