@@ -6,6 +6,7 @@ package guard
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +14,15 @@ import (
 	"regexp"
 	"strings"
 )
+
+const maxScanTokenSize = 10 * 1024 * 1024 // 支持最大 10MB 单行源码扫描，防止超长行静默截断
+
+func newSafeScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, maxScanTokenSize)
+	return scanner
+}
 
 // Violation 记录一处具体的合规违规项
 type Violation struct {
@@ -99,7 +109,7 @@ func newGitContext(root string) *gitContext {
 	lsCmd.Dir = root
 	out, err := lsCmd.Output()
 	if err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
+		scanner := newSafeScanner(strings.NewReader(string(out)))
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
@@ -341,7 +351,7 @@ func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext) {
 		}
 		defer f.Close()
 
-		scanner := bufio.NewScanner(f)
+		scanner := newSafeScanner(f)
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
@@ -515,7 +525,7 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 		}
 		defer f.Close()
 
-		scanner := bufio.NewScanner(f)
+		scanner := newSafeScanner(f)
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
@@ -753,7 +763,7 @@ func readStagedFileLines(root, slashPath string) ([]string, error) {
 	out, err := cmd.Output()
 	if err == nil {
 		var lines []string
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
+		scanner := newSafeScanner(strings.NewReader(string(out)))
 		for scanner.Scan() {
 			lines = append(lines, scanner.Text())
 		}
@@ -768,7 +778,7 @@ func readStagedFileLines(root, slashPath string) ([]string, error) {
 	defer f.Close()
 
 	var lines []string
-	scanner := bufio.NewScanner(f)
+	scanner := newSafeScanner(f)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}

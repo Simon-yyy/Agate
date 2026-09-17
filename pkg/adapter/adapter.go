@@ -58,39 +58,57 @@ func DetectExistingTargets(root string) []AgentTarget {
 	return detected
 }
 
-// ResolveTargets 解析最终待挂载的目标 Agent 清单
-func ResolveTargets(explicitTargets []string, root string) []AgentTarget {
-	var targets []AgentTarget
-	hasAll := false
+// SupportedTargets 定义所有合法受支持的 Agent 目标类型与规范化映射
+var SupportedTargets = map[string]AgentTarget{
+	"cursor":      TargetCursor,
+	"antigravity": TargetAntigravity,
+	"claude":      TargetClaude,
+	"windsurf":    TargetWindsurf,
+}
 
-	for _, t := range explicitTargets {
-		lower := strings.ToLower(strings.TrimSpace(t))
-		if lower == "all" {
-			hasAll = true
-			break
+// ResolveTargets 解析最终待挂载的目标 Agent 清单（包含合法性校验与去重）
+func ResolveTargets(explicitTargets []string, root string) ([]AgentTarget, error) {
+	if len(explicitTargets) > 0 {
+		hasAll := false
+		seen := make(map[AgentTarget]bool)
+		var targets []AgentTarget
+
+		for _, t := range explicitTargets {
+			clean := strings.ToLower(strings.TrimSpace(t))
+			if clean == "" {
+				continue
+			}
+			if clean == "all" {
+				hasAll = true
+				break
+			}
+			target, ok := SupportedTargets[clean]
+			if !ok {
+				return nil, fmt.Errorf("不支持的 Agent 目标: '%s' (有效选项: cursor, antigravity, claude, windsurf, all)", t)
+			}
+			if !seen[target] {
+				seen[target] = true
+				targets = append(targets, target)
+			}
 		}
-		if lower != "" {
-			targets = append(targets, AgentTarget(lower))
+
+		if hasAll {
+			return []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf}, nil
 		}
-	}
 
-	if hasAll {
-		return []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf}
-	}
-
-	// 若用户显式指定了 targets，按指定走
-	if len(targets) > 0 {
-		return targets
+		if len(targets) > 0 {
+			return targets, nil
+		}
 	}
 
 	// 优先嗅探已有环境
 	existing := DetectExistingTargets(root)
 	if len(existing) > 0 {
-		return existing
+		return existing, nil
 	}
 
 	// 空白工程默认挂载最主流的两个工具，避免全量轰炸
-	return []AgentTarget{TargetCursor, TargetAntigravity}
+	return []AgentTarget{TargetCursor, TargetAntigravity}, nil
 }
 
 // DistributeRules 将规约内容分发至各 Agent 目标文件
@@ -101,7 +119,11 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 	}
 
 	if len(targets) == 0 {
-		targets = ResolveTargets(nil, ".")
+		var err error
+		targets, err = ResolveTargets(nil, ".")
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, target := range targets {
@@ -135,11 +157,11 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 	return nil
 }
 
-// LoadGlobalRules 尝试加载用户全局规约，按顺序探测 ~/.agate/rules.md、~/.adh/rules.md、~/my_skills/SKILL.md 等，未找到则返回 nil
-func LoadGlobalRules() ([]byte, error) {
+// LoadGlobalRules 尝试加载用户全局规约，返回规约内容、实际匹配的来源物理路径以及错误
+func LoadGlobalRules() ([]byte, string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return nil, "", fmt.Errorf("获取用户家目录失败: %w", err)
 	}
 
 	candidatePaths := []string{
@@ -150,9 +172,13 @@ func LoadGlobalRules() ([]byte, error) {
 	}
 
 	for _, p := range candidatePaths {
-		if _, err := os.Stat(p); err == nil {
-			return os.ReadFile(p)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			content, readErr := os.ReadFile(p)
+			if readErr != nil {
+				return nil, p, fmt.Errorf("发现全局规约文件 [%s] 但读取失败: %w", p, readErr)
+			}
+			return content, p, nil
 		}
 	}
-	return nil, nil
+	return nil, "", nil
 }

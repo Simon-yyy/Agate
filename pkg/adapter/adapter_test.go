@@ -61,28 +61,43 @@ func TestResolveTargets(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// 1. 显式指定单目标
-	res := ResolveTargets([]string{"cursor"}, tempDir)
-	if len(res) != 1 || res[0] != TargetCursor {
-		t.Errorf("显式指定 cursor 失败，得到: %v", res)
+	res, err := ResolveTargets([]string{"cursor"}, tempDir)
+	if err != nil || len(res) != 1 || res[0] != TargetCursor {
+		t.Errorf("显式指定 cursor 失败，得到: %v, err: %v", res, err)
 	}
 
 	// 2. 显式指定 all
-	resAll := ResolveTargets([]string{"all"}, tempDir)
-	if len(resAll) != 4 {
-		t.Errorf("指定 all 预期 4 个目标，得到: %v", resAll)
+	resAll, err := ResolveTargets([]string{"all"}, tempDir)
+	if err != nil || len(resAll) != 4 {
+		t.Errorf("指定 all 预期 4 个目标，得到: %v, err: %v", resAll, err)
 	}
 
 	// 3. 空白目录默认推荐 2 个主流目标
-	resDefault := ResolveTargets(nil, tempDir)
-	if len(resDefault) != 2 {
-		t.Errorf("空白目录预期默认 2 个目标，得到: %v", resDefault)
+	resDefault, err := ResolveTargets(nil, tempDir)
+	if err != nil || len(resDefault) != 2 {
+		t.Errorf("空白目录预期默认 2 个目标，得到: %v, err: %v", resDefault, err)
 	}
 
 	// 4. 嗅探已存在环境 (.cursorrules)
 	_ = os.WriteFile(filepath.Join(tempDir, ".cursorrules"), []byte(""), 0644)
-	resDetected := ResolveTargets(nil, tempDir)
-	if len(resDetected) != 1 || resDetected[0] != TargetCursor {
-		t.Errorf("嗅探已有 .cursorrules 失败，得到: %v", resDetected)
+	resDetected, err := ResolveTargets(nil, tempDir)
+	if err != nil || len(resDetected) != 1 || resDetected[0] != TargetCursor {
+		t.Errorf("嗅探已有 .cursorrules 失败，得到: %v, err: %v", resDetected, err)
+	}
+
+	// 5. 关键断言：未知目标必须显式报错拦截，拒绝静默吞没 (AG-013)
+	_, err = ResolveTargets([]string{"cursr"}, tempDir)
+	if err == nil {
+		t.Errorf("输入未知目标 'cursr' 预期返回错误，但返回了 nil")
+	}
+
+	// 6. 关键断言：重复指定目标自动去重
+	resDeduplicated, err := ResolveTargets([]string{"cursor", "cursor", "antigravity"}, tempDir)
+	if err != nil {
+		t.Fatalf("去重测试失败: %v", err)
+	}
+	if len(resDeduplicated) != 2 {
+		t.Errorf("重复输入预期去重为 2 个目标，实际: %d (%v)", len(resDeduplicated), resDeduplicated)
 	}
 }
 
@@ -124,5 +139,45 @@ func TestDistributeRulesBackupProtection(t *testing.T) {
 	}
 	if string(backupData) != string(originalUserRules) {
 		t.Errorf("备份文件内容不匹配，预期: %s, 实际: %s", string(originalUserRules), string(backupData))
+	}
+}
+
+func TestLoadGlobalRules(t *testing.T) {
+	tempHome, err := os.MkdirTemp("", "agate-home-*")
+	if err != nil {
+		t.Fatalf("创建临时 Home 目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempHome)
+
+	// 模拟 HOME 环境变量
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tempHome)
+	defer os.Setenv("HOME", origHome)
+
+	// 1. 未配置任何全局文件时返回 nil, "", nil
+	content, path, err := LoadGlobalRules()
+	if err != nil {
+		t.Fatalf("未配置全局规约预期返回 nil err，但得到: %v", err)
+	}
+	if content != nil || path != "" {
+		t.Errorf("未配置全局文件预期返回空，实际: path=%s, content=%v", path, content)
+	}
+
+	// 2. 模拟在 ~/.agate/rules.md 放置全局文件
+	agateDir := filepath.Join(tempHome, ".agate")
+	_ = os.MkdirAll(agateDir, 0755)
+	rulesFile := filepath.Join(agateDir, "rules.md")
+	testRuleContent := "# My Custom Global Rules"
+	_ = os.WriteFile(rulesFile, []byte(testRuleContent), 0644)
+
+	content, path, err = LoadGlobalRules()
+	if err != nil {
+		t.Fatalf("读取全局规约失败: %v", err)
+	}
+	if path != rulesFile {
+		t.Errorf("来源路径预期为 %s，实际为 %s", rulesFile, path)
+	}
+	if string(content) != testRuleContent {
+		t.Errorf("规约内容预期 %s，实际 %s", testRuleContent, string(content))
 	}
 }

@@ -441,4 +441,26 @@ func TestRunStagedAudit(t *testing.T) {
 	}
 }
 
+func TestLargeLineSourceAudited(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-largeline-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 构造一行超过 70KB 的超长代码行（包含一个违规 debugger 断点）
+	largePadding := strings.Repeat("/* padding */ ", 5000) // 约 70KB
+	dirtyCode := "package main\n\nfunc BigLine() {\n\t" + largePadding + "\n\tdebugger\n}\n"
+
+	filePath := filepath.Join(tempDir, "big.go")
+	if err := os.WriteFile(filePath, []byte(dirtyCode), 0644); err != nil {
+		t.Fatalf("写入超长大文件失败: %v", err)
+	}
+
+	res := RunPreflightAudit(tempDir)
+	if !res.HasErrors() {
+		t.Errorf("超长单行文件中的 debugger 断点未被成功捕获，存在 Scanner 截断失效缺陷！")
+	}
+}
+
 

@@ -15,3 +15,4 @@ logs/
 .cursor/
 .agents/
 .ai-memory/
+.env*

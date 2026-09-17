@@ -54,8 +54,20 @@ var initCmd = &cobra.Command{
 		}
 
 		// 3. 挂载规约 (智能按需探测或按指定分发)
-		targets := adapter.ResolveTargets(flagTargets, ".")
-		globalRules, _ := adapter.LoadGlobalRules()
+		targets, err := adapter.ResolveTargets(flagTargets, ".")
+		if err != nil {
+			return err
+		}
+
+		globalRules, sourcePath, err := adapter.LoadGlobalRules()
+		if err != nil {
+			fmt.Printf("  \033[93m[!] 发现全局规约文件 [%s] 但读取失败: %v，已平滑降级使用内置标准规约\033[0m\n", sourcePath, err)
+		} else if sourcePath != "" {
+			fmt.Printf("  \033[92m[+] 已加载全局统一规约 -> %s\033[0m\n", sourcePath)
+		} else {
+			fmt.Println("  \033[90m[i] 未检测到全局定制规约，采用内置标准协同规约\033[0m")
+		}
+
 		if err := adapter.DistributeRules(globalRules, targets); err != nil {
 			return err
 		}
@@ -88,15 +100,24 @@ var initCmd = &cobra.Command{
 		}
 
 		// 7. 安装本地 Git 物理双重门禁
+		var partialWarnings []string
 		if git.IsGitRepo() && !flagNoHook {
 			if err := git.InstallHooks(); err != nil {
+				partialWarnings = append(partialWarnings, fmt.Sprintf("Git 物理门禁未就绪: %v (可稍后运行 `agate hook install` 重试)", err))
 				fmt.Printf("  \033[93m[!] 挂载 Git 物理门禁提示: %v\033[0m\n", err)
 			} else {
 				fmt.Println("  \033[92m[+] 已挂载私有 Git 双重物理门禁 (pre-commit 验证 + pre-push 阻断)\033[0m")
 			}
 		}
 
-		fmt.Println("\n\033[92m=== [完成] 工程护栏挂载完毕 ===\033[0m")
+		if len(partialWarnings) > 0 {
+			fmt.Println("\n\033[93m=== [提示] 工程护栏部分挂载完成 (存在未就绪组件) ===\033[0m")
+			for _, w := range partialWarnings {
+				fmt.Printf("  \033[93m• %s\033[0m\n", w)
+			}
+		} else {
+			fmt.Println("\n\033[92m=== [完成] 工程护栏全量挂载完毕 ===\033[0m")
+		}
 		fmt.Println("\033[93m💡 后续协同建议：\033[0m")
 		fmt.Println("  1. 规约已在本地注入生效，在此项目中与 AI 对话将默认遵守“方案对齐 + 闭环自检”安全门禁；")
 		fmt.Println("  2. (可选冷启动) 如需为 AI 注入全局架构认知，可向 AI 发送：")

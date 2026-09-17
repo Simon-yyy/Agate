@@ -11,6 +11,9 @@ import (
 
 // DefaultExcludedItems 默认需要进行隐形隔离的 AI 私有文件/目录
 var DefaultExcludedItems = []string{
+	".env",
+	".env.*",
+	".env.local",
 	".gemini/",
 	".cursor/",
 	".agents/",
