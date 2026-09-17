@@ -162,9 +162,8 @@ func TestTaskCmdHandoverDynamicTestVerification(t *testing.T) {
 	rootCmd.SetArgs([]string{"task", "claim", "--agent=antigravity"})
 	_ = rootCmd.Execute()
 
-	// 2. 写入一个失败的自检脚本 verify.sh (模拟单测红灯)
-	verifySh := filepath.Join(tempDir, "verify.sh")
-	_ = os.WriteFile(verifySh, []byte("#!/bin/sh\necho 'unit test failed' >&2\nexit 1\n"), 0755)
+	// 2. 写入一个失败的当前平台自检脚本（模拟单测红灯）
+	writeVerifyFixture(t, tempDir, false)
 
 	// 3. 执行交接 -> 预期被动态测试门禁拦截拒绝
 	buf := new(bytes.Buffer)
@@ -206,8 +205,7 @@ func TestTaskCmdDoneWorkflow(t *testing.T) {
 	_ = rootCmd.Execute()
 
 	// 2. 模拟单测红灯，task done 应该被阻断
-	verifySh := filepath.Join(tempDir, "verify.sh")
-	_ = os.WriteFile(verifySh, []byte("#!/bin/sh\nexit 1\n"), 0755)
+	writeVerifyFixture(t, tempDir, false)
 
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
@@ -219,7 +217,7 @@ func TestTaskCmdDoneWorkflow(t *testing.T) {
 	}
 
 	// 3. 修复单测，再次调用 task done
-	_ = os.WriteFile(verifySh, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	writeVerifyFixture(t, tempDir, true)
 	buf.Reset()
 	rootCmd.SetArgs([]string{"task", "done", "--agent=cursor", "--note=全量完工验收"})
 	if err := rootCmd.Execute(); err != nil {

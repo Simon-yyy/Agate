@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func runGitTestCommand(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s 失败: %v, output: %s", strings.Join(args, " "), err, string(out))
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestGetGitDiffAndMetadata(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "agate-git-diff-*")
 	if err != nil {
@@ -16,21 +26,23 @@ func TestGetGitDiffAndMetadata(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// 初始化 git 仓库
-	cmdInit := exec.Command("git", "init")
-	cmdInit.Dir = tempDir
-	if err := cmdInit.Run(); err != nil {
-		t.Fatalf("git init 失败: %v", err)
-	}
+	runGitTestCommand(t, tempDir, "init")
 
 	// 配置 git user
-	_ = exec.Command("git", "-C", tempDir, "config", "user.name", "Agate Tester").Run()
-	_ = exec.Command("git", "-C", tempDir, "config", "user.email", "tester@agate.local").Run()
+	runGitTestCommand(t, tempDir, "config", "user.name", "Agate Tester")
+	runGitTestCommand(t, tempDir, "config", "user.email", "tester@agate.local")
 
 	// 1. 测试首个提交
 	helloPath := filepath.Join(tempDir, "hello.txt")
-	_ = os.WriteFile(helloPath, []byte("line 1\n"), 0644)
-	_ = exec.Command("git", "-C", tempDir, "add", "hello.txt").Run()
-	_ = exec.Command("git", "-C", tempDir, "commit", "-m", "initial commit").Run()
+	if err := os.WriteFile(helloPath, []byte("line 1\n"), 0644); err != nil {
+		t.Fatalf("写入初始测试文件失败: %v", err)
+	}
+	runGitTestCommand(t, tempDir, "add", "hello.txt")
+	// 使用 Git plumbing 创建提交，避免测试依赖 Git Bash/Hook 执行能力。
+	tree := runGitTestCommand(t, tempDir, "write-tree")
+	commitHash := runGitTestCommand(t, tempDir, "commit-tree", tree, "-m", "initial commit")
+	runGitTestCommand(t, tempDir, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGitTestCommand(t, tempDir, "update-ref", "refs/heads/main", commitHash)
 
 	// 验证 metadata
 	branch, commit, err := GetGitMetadata(tempDir)
@@ -55,7 +67,7 @@ func TestGetGitDiffAndMetadata(t *testing.T) {
 	}
 
 	// 3. 暂存改动 (staged diff)
-	_ = exec.Command("git", "-C", tempDir, "add", "hello.txt").Run()
+	runGitTestCommand(t, tempDir, "add", "hello.txt")
 	diffStaged, err := GetGitDiff(true, tempDir)
 	if err != nil {
 		t.Fatalf("GetGitDiff(staged) 报错: %v", err)

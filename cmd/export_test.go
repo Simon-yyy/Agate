@@ -61,8 +61,8 @@ func TestVerifyCmdWithReportFlag(t *testing.T) {
 	_, cleanup := initTestGitRepo(t)
 	defer cleanup()
 
-	// 创建一个最简 verify.sh
-	_ = os.WriteFile("verify.sh", []byte("#!/bin/sh\necho 'verify ok'\nexit 0\n"), 0755)
+	// 创建一个当前平台可执行的最简自检脚本
+	writeVerifyFixture(t, ".", true)
 
 	// 执行 agate verify --report
 	rootCmd.SetArgs([]string{"verify", "--report"})

@@ -269,6 +269,15 @@ func TestGetStagedFiles(t *testing.T) {
 }
 
 func TestPrePushHookAuthorization(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("当前环境未安装 Bash，跳过 Hook shell 集成测试")
+	}
+	probe := exec.Command(bashPath, "-c", "exit 0")
+	if out, err := probe.CombinedOutput(); err != nil {
+		t.Skipf("当前环境无法执行 Bash，跳过 Hook shell 集成测试: %v, output: %s", err, string(out))
+	}
+
 	tempDir, err := os.MkdirTemp("", "agate-hook-auth-*")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)
@@ -291,7 +300,7 @@ func TestPrePushHookAuthorization(t *testing.T) {
 
 	// 辅助执行函数：在子进程中运行 pre-push（非终端环境），设置特定环境变量
 	runHookWithEnv := func(envVal string, setEnv bool) (int, string) {
-		cmd := exec.Command("bash", prePushScript)
+		cmd := exec.Command(bashPath, prePushScript)
 		cmd.Dir = tempDir
 		var env []string
 		for _, e := range os.Environ() {
@@ -346,7 +355,7 @@ func TestPrePushHookAuthorization(t *testing.T) {
 	}
 
 	// Case 6: 存在 Agent 环境变量 (如 CURSOR_AGENT=1) 且未授权 -> 强行拦截 (RSK-001)
-	cmdAgent := exec.Command("bash", prePushScript)
+	cmdAgent := exec.Command(bashPath, prePushScript)
 	cmdAgent.Dir = tempDir
 	var agentEnv []string
 	for _, e := range os.Environ() {

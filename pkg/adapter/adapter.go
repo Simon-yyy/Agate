@@ -163,7 +163,11 @@ func LoadGlobalRules() ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("获取用户家目录失败: %w", err)
 	}
+	return loadGlobalRulesFrom(homeDir)
+}
 
+// loadGlobalRulesFrom 从显式家目录加载全局规约，便于跨平台测试隔离。
+func loadGlobalRulesFrom(homeDir string) ([]byte, string, error) {
 	candidatePaths := []string{
 		filepath.Join(homeDir, ".agate", "rules.md"),
 		filepath.Join(homeDir, ".config", "agate", "rules.md"),

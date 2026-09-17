@@ -149,13 +149,8 @@ func TestLoadGlobalRules(t *testing.T) {
 	}
 	defer os.RemoveAll(tempHome)
 
-	// 模拟 HOME 环境变量
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempHome)
-	defer os.Setenv("HOME", origHome)
-
 	// 1. 未配置任何全局文件时返回 nil, "", nil
-	content, path, err := LoadGlobalRules()
+	content, path, err := loadGlobalRulesFrom(tempHome)
 	if err != nil {
 		t.Fatalf("未配置全局规约预期返回 nil err，但得到: %v", err)
 	}
@@ -170,7 +165,7 @@ func TestLoadGlobalRules(t *testing.T) {
 	testRuleContent := "# My Custom Global Rules"
 	_ = os.WriteFile(rulesFile, []byte(testRuleContent), 0644)
 
-	content, path, err = LoadGlobalRules()
+	content, path, err = loadGlobalRulesFrom(tempHome)
 	if err != nil {
 		t.Fatalf("读取全局规约失败: %v", err)
 	}

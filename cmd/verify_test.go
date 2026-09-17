@@ -5,9 +5,34 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// writeVerifyFixture 按当前平台生成可执行的自检脚本，避免 Windows 测试依赖 WSL/Bash。
+func writeVerifyFixture(t *testing.T, dir string, success bool) string {
+	t.Helper()
+
+	name := "verify.sh"
+	content := "#!/bin/sh\nexit 0\n"
+	if !success {
+		content = "#!/bin/sh\necho 'unit test failed' >&2\nexit 1\n"
+	}
+	if runtime.GOOS == "windows" {
+		name = "verify.cmd"
+		content = "@echo off\r\nexit /b 0\r\n"
+		if !success {
+			content = "@echo off\r\necho unit test failed 1>&2\r\nexit /b 1\r\n"
+		}
+	}
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+		t.Fatalf("写入测试自检脚本失败: %v", err)
+	}
+	return path
+}
 
 // initTestGitRepo 在临时目录初始化一个干净的 Git 仓库并切换当前工作目录
 func initTestGitRepo(t *testing.T) (string, func()) {
@@ -197,9 +222,8 @@ func TestVerifyCmdRunsFromSubdirectory(t *testing.T) {
 	tempDir, cleanup := initTestGitRepo(t)
 	defer cleanup()
 
-	// 根目录下放置自定义 verify.sh 脚本
-	verifyScript := filepath.Join(tempDir, "verify.sh")
-	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	// 根目录下放置当前平台可执行的自检脚本
+	writeVerifyFixture(t, tempDir, true)
 
 	// 创建深层子目录并在子目录中调用 verify (AG-016)
 	subDir := filepath.Join(tempDir, "pkg", "core")
@@ -218,8 +242,7 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 	defer cleanup()
 
 	// 注入失败的自检脚本
-	verifyScript := filepath.Join(tempDir, "verify.sh")
-	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 1\n"), 0755)
+	verifyScript := writeVerifyFixture(t, tempDir, false)
 
 	// Strike 1: 第一次失败
 	buf := new(bytes.Buffer)
@@ -242,7 +265,13 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 	}
 
 	// 修复脚本，变为通过
-	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	if runtime.GOOS == "windows" {
+		if err := os.WriteFile(verifyScript, []byte("@echo off\r\nexit /b 0\r\n"), 0755); err != nil {
+			t.Fatalf("修复测试自检脚本失败: %v", err)
+		}
+	} else if err := os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("修复测试自检脚本失败: %v", err)
+	}
 	buf.Reset()
 	rootCmd.SetArgs([]string{"verify"})
 	if err := rootCmd.Execute(); err != nil {
@@ -255,4 +284,3 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 		t.Errorf("自检成功后计数文件应被清除重置")
 	}
 }
-
