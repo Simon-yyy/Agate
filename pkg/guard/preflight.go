@@ -50,6 +50,23 @@ func (r *AuditResult) HasErrors() bool {
 	return false
 }
 
+var sensitivePattern = regexp.MustCompile(`(?i)([a-zA-Z0-9_]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|auth)[a-zA-Z0-9_]*)\s*([:=]+)\s*(['"][^'"]+['"]|[^\s,;]+)`)
+
+// maskSensitiveLine 对代码行中可能包含的数据库密码、Secret 或 API Token 执行掩码遮蔽，防二次泄露
+func maskSensitiveLine(line string) string {
+	return sensitivePattern.ReplaceAllStringFunc(line, func(match string) string {
+		sub := sensitivePattern.FindStringSubmatch(match)
+		if len(sub) == 4 {
+			op := sub[2]
+			if op == ":" {
+				return fmt.Sprintf("%s: \"******\"", sub[1])
+			}
+			return fmt.Sprintf("%s %s \"******\"", sub[1], op)
+		}
+		return match
+	})
+}
+
 // PrintReport 打印彩色审计报告
 func (r *AuditResult) PrintReport() {
 	if len(r.Violations) == 0 {
@@ -72,7 +89,7 @@ func (r *AuditResult) PrintReport() {
 		fmt.Printf("  %d. %s [%s] %s\n", i+1, prefix, v.Category, location)
 		fmt.Printf("     问题: %s\n", v.Message)
 		if v.LineContent != "" {
-			fmt.Printf("     代码: %s\n", strings.TrimSpace(v.LineContent))
+			fmt.Printf("     代码: %s\n", maskSensitiveLine(strings.TrimSpace(v.LineContent)))
 		}
 		if v.Suggestion != "" {
 			fmt.Printf("     建议: \033[96m%s\033[0m\n", v.Suggestion)

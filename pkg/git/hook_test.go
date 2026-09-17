@@ -64,8 +64,8 @@ func TestInstallAndUninstallHooks(t *testing.T) {
 		t.Fatalf("读取 pre-push 脚本失败: %v", err)
 	}
 	contentStr := string(pushContent)
-	if !strings.Contains(contentStr, "ALLOW_AUTOMATED_PUSH") {
-		t.Errorf("pre-push 脚本未包含防自动化偷跑核心拦截逻辑，实际内容:\n%s", contentStr)
+	if !strings.Contains(contentStr, `"$ALLOW_AUTOMATED_PUSH" = "1"`) {
+		t.Errorf("pre-push 脚本未包含严格的正向白名单授权校验逻辑，实际内容:\n%s", contentStr)
 	}
 
 	// 执行卸载
@@ -265,5 +265,83 @@ func TestGetStagedFiles(t *testing.T) {
 	}
 	if !foundSpecial {
 		t.Errorf("未正确解析中文与空格文件名 [%s]，实际暂存清单: %v", specialFile, files)
+	}
+}
+
+func TestPrePushHookAuthorization(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-hook-auth-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	if err := exec.Command("git", "init").Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	if err := InstallHooks(); err != nil {
+		t.Fatalf("InstallHooks 失败: %v", err)
+	}
+
+	prePushScript := filepath.Join(tempDir, ".git", "custom-hooks", "pre-push")
+
+	// 辅助执行函数：在子进程中运行 pre-push（非终端环境），设置特定环境变量
+	runHookWithEnv := func(envVal string, setEnv bool) (int, string) {
+		cmd := exec.Command("bash", prePushScript)
+		cmd.Dir = tempDir
+		var env []string
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "ALLOW_AUTOMATED_PUSH=") {
+				env = append(env, e)
+			}
+		}
+		if setEnv {
+			env = append(env, "ALLOW_AUTOMATED_PUSH="+envVal)
+		}
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		exitCode := 0
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = -1
+			}
+		}
+		return exitCode, string(out)
+	}
+
+	// Case 1: 未设置环境变量 -> 应该被拦截 (退出码 1)
+	code, out := runHookWithEnv("", false)
+	if code != 1 || !strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("未设置 ALLOW_AUTOMATED_PUSH 时预期被拦截，实际 code=%d, out=%s", code, out)
+	}
+
+	// Case 2: 设置 ALLOW_AUTOMATED_PUSH=0 -> 应该被拦截 (AG-006 核心验证)
+	code, out = runHookWithEnv("0", true)
+	if code != 1 || !strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("ALLOW_AUTOMATED_PUSH=0 时预期被拦截，但实际通过！code=%d, out=%s", code, out)
+	}
+
+	// Case 3: 设置 ALLOW_AUTOMATED_PUSH=false -> 应该被拦截
+	code, out = runHookWithEnv("false", true)
+	if code != 1 || !strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("ALLOW_AUTOMATED_PUSH=false 时预期被拦截，但实际通过！code=%d, out=%s", code, out)
+	}
+
+	// Case 4: 设置 ALLOW_AUTOMATED_PUSH=1 -> 显式授权通过硬门禁
+	_, out = runHookWithEnv("1", true)
+	if strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("ALLOW_AUTOMATED_PUSH=1 时预期通过硬门禁，但被拦截: %s", out)
+	}
+
+	// Case 5: 设置 ALLOW_AUTOMATED_PUSH=true -> 显式授权通过硬门禁
+	_, out = runHookWithEnv("true", true)
+	if strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("ALLOW_AUTOMATED_PUSH=true 时预期通过硬门禁，但被拦截: %s", out)
 	}
 }

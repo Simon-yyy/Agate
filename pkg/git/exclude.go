@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -104,23 +105,36 @@ func ApplyPrivateExclusions(items []string) (int, error) {
 		return 0, fmt.Errorf("创建 Git info 目录失败: %w", err)
 	}
 
-	hasMarker := false
+	var existingLines []string
 	existingSet := make(map[string]bool)
-	if _, err := os.Stat(excludePath); err == nil {
-		f, err := os.Open(excludePath)
-		if err == nil {
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if strings.Contains(line, "agate private tracking start") || strings.Contains(line, "adh private tracking start") {
-					hasMarker = true
-				}
-				if line != "" && !strings.HasPrefix(line, "#") {
-					existingSet[line] = true
-				}
+	startMarkerIdx := -1
+	endMarkerIdx := -1
+
+	data, err := os.ReadFile(excludePath)
+	if err == nil {
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		idx := 0
+		for scanner.Scan() {
+			rawLine := scanner.Text()
+			trimmed := strings.TrimSpace(rawLine)
+			existingLines = append(existingLines, rawLine)
+
+			if strings.Contains(trimmed, "agate private tracking start") || strings.Contains(trimmed, "adh private tracking start") {
+				startMarkerIdx = idx
+			} else if strings.Contains(trimmed, "agate private tracking end") || strings.Contains(trimmed, "adh private tracking end") {
+				endMarkerIdx = idx
 			}
-			f.Close()
+
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				existingSet[trimmed] = true
+			}
+			idx++
 		}
+		if err := scanner.Err(); err != nil {
+			return 0, fmt.Errorf("解析 .git/info/exclude 失败: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return 0, fmt.Errorf("读取 .git/info/exclude 失败: %w", err)
 	}
 
 	var toAppend []string
@@ -128,6 +142,7 @@ func ApplyPrivateExclusions(items []string) (int, error) {
 		cleanItem := strings.TrimSpace(item)
 		if cleanItem != "" && !existingSet[cleanItem] {
 			toAppend = append(toAppend, cleanItem)
+			existingSet[cleanItem] = true // 同批次去重防重复注入 (AG-028)
 		}
 	}
 
@@ -135,24 +150,30 @@ func ApplyPrivateExclusions(items []string) (int, error) {
 		return 0, nil
 	}
 
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return 0, fmt.Errorf("打开 .git/info/exclude 失败: %w", err)
+	var newLines []string
+	if startMarkerIdx != -1 && endMarkerIdx != -1 && endMarkerIdx > startMarkerIdx {
+		// 已存在完整的受管块：在 endMarker 前精准插入新条目 (AG-028)
+		newLines = append(newLines, existingLines[:endMarkerIdx]...)
+		newLines = append(newLines, toAppend...)
+		newLines = append(newLines, existingLines[endMarkerIdx:]...)
+	} else if startMarkerIdx != -1 && (endMarkerIdx == -1 || endMarkerIdx < startMarkerIdx) {
+		// 存在 start 标记但缺少 end 标记（异常截断）：在末尾补齐条目与 end 标记
+		newLines = append(newLines, existingLines...)
+		newLines = append(newLines, toAppend...)
+		newLines = append(newLines, "# --- agate private tracking end ---")
+	} else {
+		// 尚无受管块：在文件尾部新建规范受管块
+		newLines = append(newLines, existingLines...)
+		if len(newLines) > 0 && strings.TrimSpace(newLines[len(newLines)-1]) != "" {
+			newLines = append(newLines, "")
+		}
+		newLines = append(newLines, "# --- agate private tracking start ---")
+		newLines = append(newLines, toAppend...)
+		newLines = append(newLines, "# --- agate private tracking end ---")
 	}
-	defer f.Close()
 
-	var sb strings.Builder
-	if !hasMarker {
-		sb.WriteString("\n# --- agate private tracking start ---\n")
-	}
-	for _, item := range toAppend {
-		sb.WriteString(item + "\n")
-	}
-	if !hasMarker {
-		sb.WriteString("# --- agate private tracking end ---\n")
-	}
-
-	if _, err := f.WriteString(sb.String()); err != nil {
+	outContent := strings.Join(newLines, "\n") + "\n"
+	if err := os.WriteFile(excludePath, []byte(outContent), 0644); err != nil {
 		return 0, fmt.Errorf("写入 .git/info/exclude 失败: %w", err)
 	}
 

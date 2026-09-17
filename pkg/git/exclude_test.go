@@ -168,3 +168,77 @@ func TestGitWorktreeCompatibility(t *testing.T) {
 		t.Fatalf("在 worktree 下安装物理门禁失败: %v", err)
 	}
 }
+
+func TestApplyPrivateExclusionsManagedBlockInsertionAndDedup(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-git-managed-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	gitDir := filepath.Join(tempDir, ".git")
+	_ = os.MkdirAll(filepath.Join(gitDir, "info"), 0755)
+
+	initialContent := `# user custom rule
+*.local
+
+# --- agate private tracking start ---
+.gemini/
+# --- agate private tracking end ---
+
+# trailing user rule
+my-notes.txt
+`
+	excludePath := filepath.Join(gitDir, "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("写入测试初始 exclude 失败: %v", err)
+	}
+
+	// 传入包含自身同批重复的切片
+	items := []string{"TASK.md", "TASK.md", ".cursorrules"}
+	count, err := ApplyPrivateExclusions(items)
+	if err != nil {
+		t.Fatalf("ApplyPrivateExclusions 失败: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("同批次去重预期写入 2 项，实际写入: %d", count)
+	}
+
+	updated, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("读取更新后的 exclude 失败: %v", err)
+	}
+	updatedStr := string(updated)
+
+	// 验证同批去重有效
+	if strings.Count(updatedStr, "TASK.md") != 1 {
+		t.Errorf("TASK.md 出现次数不为 1，去重失效，内容:\n%s", updatedStr)
+	}
+
+	// 验证位置：TASK.md 和 .cursorrules 必须位于 end 标记之前
+	startIdx := strings.Index(updatedStr, "# --- agate private tracking start ---")
+	endIdx := strings.Index(updatedStr, "# --- agate private tracking end ---")
+	taskIdx := strings.Index(updatedStr, "TASK.md")
+	cursorIdx := strings.Index(updatedStr, ".cursorrules")
+	trailingIdx := strings.Index(updatedStr, "my-notes.txt")
+
+	if taskIdx < startIdx || taskIdx > endIdx {
+		t.Errorf("TASK.md 未被正确插入至受管块内部 (start~end之间)")
+	}
+	if cursorIdx < startIdx || cursorIdx > endIdx {
+		t.Errorf(".cursorrules 未被正确插入至受管块内部 (start~end之间)")
+	}
+	if trailingIdx < endIdx {
+		t.Errorf("用户尾部自定义内容 my-notes.txt 遭到移位或破坏")
+	}
+
+	// 再次执行，幂等返回 0
+	count2, err := ApplyPrivateExclusions(items)
+	if err != nil || count2 != 0 {
+		t.Errorf("幂等重新写入预期 0，实际: %d, err: %v", count2, err)
+	}
+}

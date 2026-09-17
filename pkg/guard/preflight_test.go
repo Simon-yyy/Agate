@@ -463,4 +463,43 @@ func TestLargeLineSourceAudited(t *testing.T) {
 	}
 }
 
+func TestMaskSensitiveLine(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    `db_password := "SuperSecret123"; debugger`,
+			expected: `db_password := "******"; debugger`,
+		},
+		{
+			input:    `apiKey: "sk-proj-999999999"`,
+			expected: `apiKey: "******"`,
+		},
+		{
+			input:    `ACCESS_TOKEN = 'ghp_xxxxxx'`,
+			expected: `ACCESS_TOKEN = "******"`,
+		},
+		{
+			input:    `auth_secret=mysecret123`,
+			expected: `auth_secret = "******"`,
+		},
+		{
+			input:    `normalVar := 42; // debugger`,
+			expected: `normalVar := 42; // debugger`,
+		},
+		{
+			input:    `token := "secret1"; password := "secret2"`,
+			expected: `token := "******"; password := "******"`,
+		},
+	}
+
+	for _, c := range cases {
+		got := maskSensitiveLine(c.input)
+		if got != c.expected {
+			t.Errorf("maskSensitiveLine(%q) = %q, expected %q", c.input, got, c.expected)
+		}
+	}
+}
+
 

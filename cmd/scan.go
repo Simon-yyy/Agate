@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"agate/pkg/harness"
@@ -46,8 +47,13 @@ var scanCmd = &cobra.Command{
 		if len(topo.PortInfo) == 0 {
 			fmt.Println("  - 未检测到显式端口配置（默认端口或纯库函数项目）")
 		} else {
-			for file, port := range topo.PortInfo {
-				fmt.Printf("  - %-25s -> %s\n", file, port)
+			var files []string
+			for file := range topo.PortInfo {
+				files = append(files, file)
+			}
+			sort.Strings(files)
+			for _, file := range files {
+				fmt.Printf("  - %-25s -> %s\n", file, topo.PortInfo[file])
 			}
 		}
 
@@ -161,8 +167,13 @@ func appendTopologyToAgents(topo *ProjectTopology) error {
 	}
 	if len(topo.PortInfo) > 0 {
 		sb.WriteString("### 侦测端口矩阵:\n")
-		for f, p := range topo.PortInfo {
-			sb.WriteString(fmt.Sprintf("- `%s`: %s\n", f, p))
+		var files []string
+		for f := range topo.PortInfo {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			sb.WriteString(fmt.Sprintf("- `%s`: %s\n", f, topo.PortInfo[f]))
 		}
 	}
 	sb.WriteString("<!-- agate scan autogen end -->\n")
@@ -215,8 +226,13 @@ func appendTopologyToContext(topo *ProjectTopology) error {
 	}
 	if len(topo.PortInfo) > 0 {
 		sb.WriteString("### 侦测服务与端口契约:\n")
-		for f, p := range topo.PortInfo {
-			sb.WriteString(fmt.Sprintf("- `%s`: %s\n", f, p))
+		var files []string
+		for f := range topo.PortInfo {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			sb.WriteString(fmt.Sprintf("- `%s`: %s\n", f, topo.PortInfo[f]))
 		}
 	}
 	sb.WriteString("<!-- agate scan autogen end -->\n")

@@ -38,13 +38,18 @@ set -e
 
 # 1. 物理防 AI/脚本自动化偷跑推流 (Anti-Automation Gate, Fail-Fast 毫秒短路)
 # 注意：Git 调用 pre-push 时会将待推送分支列表通过 stdin (fd 0) 管道喂入，因此 fd 0 永远为管道；
-# 必须检测 stdout (fd 1) 或 stderr (fd 2) 是否连接至真实终端，或检查环境变量豁免。
-if [ -z "$ALLOW_AUTOMATED_PUSH" ] && [ ! -t 1 ] && [ ! -t 2 ]; then
+# 必须检测 stdout (fd 1) 或 stderr (fd 2) 是否连接至真实终端，或检查环境变量显式授权 (仅认 1 或 true)。
+is_authorized=0
+if [ "$ALLOW_AUTOMATED_PUSH" = "1" ] || [ "$ALLOW_AUTOMATED_PUSH" = "true" ]; then
+    is_authorized=1
+fi
+
+if [ "$is_authorized" -eq 0 ] && [ ! -t 1 ] && [ ! -t 2 ]; then
     echo -e "\n\033[91m=================================================================\033[0m"
     echo -e "\033[91m[BLOCKED] 触发 Agate pre-push 物理硬门禁拦截！\033[0m"
     echo -e ">> 检测到当前处于非交互式终端/自动化脚本环境尝试执行 git push。"
     echo -e ">> 安全保护：未获得人类用户显式授权，严禁任何 AI/脚本擅自偷跑推流！"
-    echo -e ">> 授权通道：唯有在用户明确指令推送时，Agent 方可声明 ALLOW_AUTOMATED_PUSH=1 执行；"
+    echo -e ">> 授权通道：唯有在用户明确指令推送时，声明 ALLOW_AUTOMATED_PUSH=1 方可执行；"
     echo -e ">> 常规场景：请由人类用户在交互式终端中手动敲击 git push。"
     echo -e "\033[91m=================================================================\033[0m\n"
     exit 1
