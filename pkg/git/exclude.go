@@ -27,20 +27,26 @@ var DefaultExcludedItems = []string{
 }
 
 // GetGitCommonDir 解析并返回当前工程真实的 Git 存储公共目录（兼容常规仓、Git Worktree 与 Submodule）
-func GetGitCommonDir() (string, error) {
-	stat, err := os.Stat(".git")
+func GetGitCommonDir(dir ...string) (string, error) {
+	base := "."
+	if len(dir) > 0 && dir[0] != "" {
+		base = dir[0]
+	}
+
+	gitPath := filepath.Join(base, ".git")
+	stat, err := os.Stat(gitPath)
 	if err == nil {
 		if stat.IsDir() {
-			return ".git", nil
+			return gitPath, nil
 		}
 		// 若 .git 为普通文件，说明处于 git worktree 或 submodule 下
-		content, readErr := os.ReadFile(".git")
+		content, readErr := os.ReadFile(gitPath)
 		if readErr == nil {
 			line := strings.TrimSpace(string(content))
 			if strings.HasPrefix(line, "gitdir:") {
 				gitDir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
 				if !filepath.IsAbs(gitDir) {
-					gitDir = filepath.Clean(filepath.Join(".", gitDir))
+					gitDir = filepath.Clean(filepath.Join(base, gitDir))
 				}
 				// 检查 worktree 内部是否有 commondir 指向主仓
 				commondirFile := filepath.Join(gitDir, "commondir")
@@ -58,11 +64,15 @@ func GetGitCommonDir() (string, error) {
 
 	// 兜底调用 git 原生命令获取公共目录
 	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = base
 	out, cmdErr := cmd.Output()
 	if cmdErr == nil {
 		res := strings.TrimSpace(string(out))
 		if res != "" {
-			return filepath.Clean(res), nil
+			if !filepath.IsAbs(res) {
+				res = filepath.Clean(filepath.Join(base, res))
+			}
+			return res, nil
 		}
 	}
 

@@ -74,12 +74,21 @@ echo "[+] 已更新 $ROOT_FILE 版本号至 $NEW_VERSION"
 echo "[+] 正在触发全平台编译与归档..."
 ./scripts/archive.sh
 
-# 5. 更新本地当前环境可执行文件
-if [ -f "bin/v$NEW_VERSION/linux/agate" ]; then
-    mkdir -p "$HOME/.local/bin"
-    cp -f "bin/v$NEW_VERSION/linux/agate" "$HOME/.local/bin/agate"
-    chmod +x "$HOME/.local/bin/agate"
-    echo "[+] 已同步刷新本地 ~/.local/bin/agate"
+# 5. 更新本地当前环境可执行文件（根据 OS 架构自适应拷贝）
+LOCAL_BIN_DIR="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN_DIR"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    if [ -f "bin/v$NEW_VERSION/darwin/agate" ]; then
+        cp -f "bin/v$NEW_VERSION/darwin/agate" "$LOCAL_BIN_DIR/agate"
+        chmod +x "$LOCAL_BIN_DIR/agate"
+        echo "[+] 已同步刷新本地 macOS $LOCAL_BIN_DIR/agate"
+    fi
+elif [[ "$OSTYPE" == "linux"* ]]; then
+    if [ -f "bin/v$NEW_VERSION/linux/agate" ]; then
+        cp -f "bin/v$NEW_VERSION/linux/agate" "$LOCAL_BIN_DIR/agate"
+        chmod +x "$LOCAL_BIN_DIR/agate"
+        echo "[+] 已同步刷新本地 Linux $LOCAL_BIN_DIR/agate"
+    fi
 fi
 
 echo -e "\n\033[92m[✓] 本地版本升级完毕: v$NEW_VERSION\033[0m"

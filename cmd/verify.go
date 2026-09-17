@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"agate/pkg/git"
 	"agate/pkg/guard"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ import (
 var (
 	flagSkipGuard bool
 	flagStrict    bool
+	flagStaged    bool
 )
 
 var verifyCmd = &cobra.Command{
@@ -28,9 +30,35 @@ var verifyCmd = &cobra.Command{
 		startTime := time.Now()
 		fmt.Println("=== [agate verify] 闭环自检 ===")
 
-		// Phase 0: 仓库安全与代码洁癖前置拦截（支持 --skip-guard 应急逃生）
+		// Phase 0: 仓库安全与代码洁癖前置拦截（支持 --skip-guard 应急逃生与 --staged 暂存区定向模式）
 		if flagSkipGuard {
 			fmt.Println("  \033[93m[!] 已启用 --skip-guard 应急模式，跳过 Phase 0 安全红线扫描\033[0m")
+		} else if flagStaged {
+			stagedFiles, err := git.GetStagedFiles(".")
+			if err != nil {
+				fmt.Println("  \033[93m[!] 无法获取暂存区文件 (当前可能不在 Git 仓库)，平滑回退全量扫描\033[0m")
+				auditResult := guard.RunPreflightAudit(".")
+				auditResult.PrintReport()
+				if auditResult.HasErrors() {
+					elapsed := time.Since(startTime).Round(time.Millisecond)
+					fmt.Printf("\033[91m[FAIL] 触发安全护栏拦截，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+					return fmt.Errorf("触发安全护栏拦截")
+				}
+			} else if len(stagedFiles) == 0 {
+				fmt.Println("  [i] 当前 Git 暂存区 (Index) 无待提交文件，跳过自检")
+				elapsed := time.Since(startTime).Round(time.Millisecond)
+				fmt.Printf("\033[92m[PASS] 暂存区就绪 (耗时: %v)\033[0m\n", elapsed)
+				return nil
+			} else {
+				fmt.Printf("  [i] 命中 Git 暂存区审查模式，定向审查 %d 个待提交文件...\n", len(stagedFiles))
+				auditResult := guard.RunStagedAudit(".", stagedFiles)
+				auditResult.PrintReport()
+				if auditResult.HasErrors() {
+					elapsed := time.Since(startTime).Round(time.Millisecond)
+					fmt.Printf("\033[91m[FAIL] 触发安全护栏拦截，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+					return fmt.Errorf("触发安全护栏拦截")
+				}
+			}
 		} else {
 			auditResult := guard.RunPreflightAudit(".")
 			auditResult.PrintReport()
@@ -155,5 +183,6 @@ func isCommandNotFoundError(err error) bool {
 func init() {
 	verifyCmd.Flags().BoolVar(&flagSkipGuard, "skip-guard", false, "跳过 Phase 0 安全红线与代码洁癖前置扫描")
 	verifyCmd.Flags().BoolVar(&flagStrict, "strict", false, "严格模式：要求必须存在并执行有效的测试套件或自检脚本，无测试时拒绝交付")
+	verifyCmd.Flags().BoolVar(&flagStaged, "staged", false, "仅针对 Git 暂存区 (Index) 待提交文件进行高精度定向审查")
 	rootCmd.AddCommand(verifyCmd)
 }

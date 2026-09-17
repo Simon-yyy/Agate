@@ -132,3 +132,138 @@ func TestUninstallPreservesCustomUserHooks(t *testing.T) {
 		t.Errorf("用户自定义钩子内容遭到篡改")
 	}
 }
+
+func TestGetHookStatus(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-hook-status-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	// 非 Git 仓库状态检查
+	st, err := GetHookStatus()
+	if err != nil {
+		t.Fatalf("非 Git 目录应当返回 nil error，但得到: %v", err)
+	}
+	if st.IsGitRepo {
+		t.Errorf("非 Git 目录预期 IsGitRepo 为 false，但为 true")
+	}
+
+	// 初始化 Git 仓库
+	cmd := exec.Command("git", "init")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 挂载前状态检查
+	st, err = GetHookStatus()
+	if err != nil {
+		t.Fatalf("GetHookStatus 失败: %v", err)
+	}
+	if !st.IsGitRepo {
+		t.Errorf("预期 IsGitRepo 为 true")
+	}
+	if st.PreCommitExists || st.PrePushExists {
+		t.Errorf("未安装前不应存在门禁脚本")
+	}
+
+	// 挂载 Agate 门禁
+	if err := InstallHooks(); err != nil {
+		t.Fatalf("InstallHooks 失败: %v", err)
+	}
+
+	st, err = GetHookStatus()
+	if err != nil {
+		t.Fatalf("GetHookStatus 失败: %v", err)
+	}
+	if !st.PreCommitExists || !st.PreCommitAgate {
+		t.Errorf("预期 pre-commit 存在且由 Agate 托管，实际: %+v", st)
+	}
+	if !st.PrePushExists || !st.PrePushAgate {
+		t.Errorf("预期 pre-push 存在且由 Agate 托管，实际: %+v", st)
+	}
+}
+
+func TestGetStagedFiles(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-staged-test-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	cmd := exec.Command("git", "init")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+	// 配置测试用 git user 避免 commit 警告
+	_ = exec.Command("git", "config", "user.name", "AgateTest").Run()
+	_ = exec.Command("git", "config", "user.email", "test@agate.local").Run()
+
+	// 暂存区为空
+	files, err := GetStagedFiles()
+	if err != nil {
+		t.Fatalf("GetStagedFiles 失败: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("预期暂存区为空，实际: %v", files)
+	}
+
+	// 创建文件但未 git add (工作区未暂存)
+	testFile := "hello.txt"
+	if err := os.WriteFile(testFile, []byte("world"), 0644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+
+	files, err = GetStagedFiles()
+	if err != nil {
+		t.Fatalf("GetStagedFiles 失败: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("未 git add 前暂存区应依然为空，实际: %v", files)
+	}
+
+	// 执行 git add
+	if err := exec.Command("git", "add", testFile).Run(); err != nil {
+		t.Fatalf("git add 失败: %v", err)
+	}
+
+	files, err = GetStagedFiles()
+	if err != nil {
+		t.Fatalf("GetStagedFiles 失败: %v", err)
+	}
+	if len(files) != 1 || files[0] != testFile {
+		t.Errorf("预期暂存区包含 [%s]，实际: %v", testFile, files)
+	}
+
+	// 测试中文与空格特殊文件名
+	specialFile := "订单 详情.go"
+	if err := os.WriteFile(specialFile, []byte("package main"), 0644); err != nil {
+		t.Fatalf("写入特殊文件失败: %v", err)
+	}
+	if err := exec.Command("git", "add", specialFile).Run(); err != nil {
+		t.Fatalf("git add 特殊文件失败: %v", err)
+	}
+
+	files, err = GetStagedFiles()
+	if err != nil {
+		t.Fatalf("GetStagedFiles 读取特殊文件名失败: %v", err)
+	}
+	foundSpecial := false
+	for _, f := range files {
+		if f == specialFile {
+			foundSpecial = true
+			break
+		}
+	}
+	if !foundSpecial {
+		t.Errorf("未正确解析中文与空格文件名 [%s]，实际暂存清单: %v", specialFile, files)
+	}
+}

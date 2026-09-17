@@ -11,11 +11,11 @@ import (
 )
 
 const preCommitScript = `#!/usr/bin/env bash
-# agate 自动生成的 pre-commit 验证门禁
+# agate 自动生成的 pre-commit 验证门禁 (针对 Git 暂存区 Index 精准审计)
 set -e
 
 if command -v agate >/dev/null 2>&1; then
-    agate verify || exit 1
+    agate verify --staged || exit 1
 elif command -v adh >/dev/null 2>&1; then
     adh verify || exit 1
 elif [ -f "./verify.cmd" ]; then
@@ -156,4 +156,92 @@ func UninstallHooks() error {
 // UninstallPreCommitHook 向后兼容别名
 func UninstallPreCommitHook() error {
 	return UninstallHooks()
+}
+
+// HookStatusInfo 描述本地 Git 门禁配置与物理钩子状态
+type HookStatusInfo struct {
+	IsGitRepo       bool   `json:"is_git_repo"`
+	HooksPath       string `json:"hooks_path"`
+	PreCommitExists bool   `json:"pre_commit_exists"`
+	PreCommitAgate  bool   `json:"pre_commit_agate"`
+	PrePushExists   bool   `json:"pre_push_exists"`
+	PrePushAgate    bool   `json:"pre_push_agate"`
+}
+
+// GetHookStatus 查询并返回当前 Git 仓库的门禁挂载状态
+func GetHookStatus(dir ...string) (HookStatusInfo, error) {
+	var status HookStatusInfo
+
+	workDir := "."
+	if len(dir) > 0 && dir[0] != "" {
+		workDir = dir[0]
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = workDir
+	if err := cmd.Run(); err != nil {
+		status.IsGitRepo = false
+		return status, nil
+	}
+	status.IsGitRepo = true
+
+	// 查询 core.hooksPath
+	cfgCmd := exec.Command("git", "config", "--local", "core.hooksPath")
+	cfgCmd.Dir = workDir
+	if out, err := cfgCmd.Output(); err == nil {
+		status.HooksPath = strings.TrimSpace(string(out))
+	}
+
+	gitCommonDir, err := GetGitCommonDir(workDir)
+	if err != nil {
+		return status, err
+	}
+
+	effectiveHookDir := status.HooksPath
+	if effectiveHookDir == "" {
+		effectiveHookDir = filepath.Join(gitCommonDir, "hooks")
+	} else if !filepath.IsAbs(effectiveHookDir) {
+		effectiveHookDir = filepath.Join(workDir, effectiveHookDir)
+	}
+
+	// 检查 pre-commit
+	preCommitPath := filepath.Join(effectiveHookDir, "pre-commit")
+	if content, err := os.ReadFile(preCommitPath); err == nil {
+		status.PreCommitExists = true
+		status.PreCommitAgate = strings.Contains(string(content), "agate")
+	}
+
+	// 检查 pre-push
+	prePushPath := filepath.Join(effectiveHookDir, "pre-push")
+	if content, err := os.ReadFile(prePushPath); err == nil {
+		status.PrePushExists = true
+		status.PrePushAgate = strings.Contains(string(content), "agate") || strings.Contains(string(content), "ALLOW_AUTOMATED_PUSH")
+	}
+
+	return status, nil
+}
+
+// GetStagedFiles 返回当前 Git 暂存区 (Index) 中变动的文件列表 (过滤已删除文件)
+func GetStagedFiles(dir ...string) ([]string, error) {
+	workDir := "."
+	if len(dir) > 0 && dir[0] != "" {
+		workDir = dir[0]
+	}
+
+	cmd := exec.Command("git", "-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--diff-filter=ACMR")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("读取 Git 暂存区失败: %w", err)
+	}
+
+	var files []string
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed != "" {
+			files = append(files, filepath.ToSlash(trimmed))
+		}
+	}
+	return files, nil
 }

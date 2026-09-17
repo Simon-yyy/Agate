@@ -135,3 +135,41 @@ func TestVerifyCmdStrictModeFailsWhenNoTests(t *testing.T) {
 	}
 }
 
+func TestVerifyCmdStagedMode(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+	defer func() {
+		flagStaged = false
+	}()
+
+	// 1. 暂存区为空时，verify --staged 应当快速通过
+	rootCmd.SetArgs([]string{"verify", "--staged"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Fatalf("空暂存区执行 verify --staged 预期成功，但返回错误: %v", err)
+	}
+
+	// 2. 工作区写入违规文件，但不 git add；同时 git add 一个干净文件
+	cleanFile := filepath.Join(tempDir, "main.go")
+	_ = os.WriteFile(cleanFile, []byte("package main\n\nfunc main() {}\n"), 0644)
+	_ = exec.Command("git", "add", "main.go").Run()
+
+	dirtyWorktree := filepath.Join(tempDir, "dirty.go")
+	_ = os.WriteFile(dirtyWorktree, []byte("package main\n\nfunc Debug() {\n\tdebugger\n}\n"), 0644)
+
+	// verify --staged 此时应当只审查 main.go，放行（因为 dirty.go 未暂存）
+	rootCmd.SetArgs([]string{"verify", "--staged"})
+	err = rootCmd.Execute()
+	if err != nil {
+		t.Errorf("暂存区干净时 verify --staged 不应受工作区未暂存代码影响，但返回错误: %v", err)
+	}
+
+	// 3. 将 dirty.go 加入暂存区，verify --staged 应当坚决拦截！
+	_ = exec.Command("git", "add", "dirty.go").Run()
+	rootCmd.SetArgs([]string{"verify", "--staged"})
+	err = rootCmd.Execute()
+	if err == nil {
+		t.Errorf("暂存区存在违规代码时 verify --staged 预期拦截失败，但返回了 nil")
+	}
+}
+

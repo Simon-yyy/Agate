@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -350,6 +351,93 @@ func TestArchitectureMapsCompleteness(t *testing.T) {
 	res3 := RunPreflightAudit(tempDir2)
 	if res3.HasErrors() {
 		t.Errorf("双地图齐备时预期通过，但报错: %v", res3.Violations)
+	}
+}
+
+func TestInternalDirAudited(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-internal-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 1. 在 internal/service/order.go 中写入违规代码 (debugger 断点)
+	serviceDir := filepath.Join(tempDir, "internal", "service")
+	if err := os.MkdirAll(serviceDir, 0755); err != nil {
+		t.Fatalf("创建 internal/service 失败: %v", err)
+	}
+	dirtyCode := "package service\n\nfunc ProcessOrder() {\n\tdebugger\n}\n"
+	if err := os.WriteFile(filepath.Join(serviceDir, "order.go"), []byte(dirtyCode), 0644); err != nil {
+		t.Fatalf("写入测试代码失败: %v", err)
+	}
+
+	res := RunPreflightAudit(tempDir)
+	if !res.HasErrors() {
+		t.Errorf("internal/service/order.go 中的 debugger 违规代码必须被拦截，但未检测出错误！")
+	}
+
+	found := false
+	for _, v := range res.Violations {
+		if v.Category == "代码洁癖-调试断点残留" && strings.Contains(v.File, "internal/service/order.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("未能成功捕获 internal/service/order.go 的代码洁癖断点违规，实际违规: %+v", res.Violations)
+	}
+}
+
+func TestRunStagedAudit(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-staged-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	cmd := exec.Command("git", "init")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 1. 暂存区为空
+	res := RunStagedAudit(tempDir, []string{})
+	if res.HasErrors() {
+		t.Errorf("空暂存区预期无错误，但捕获到: %v", res.Violations)
+	}
+
+	// 2. 工作区有违规文件，但未放入暂存区；暂存区只有干净文件
+	cleanFile := "clean.go"
+	_ = os.WriteFile(cleanFile, []byte("package main\n\nfunc Run() {}\n"), 0644)
+	dirtyWorktreeFile := "dirty.go"
+	_ = os.WriteFile(dirtyWorktreeFile, []byte("package main\n\nfunc Debug() {\n\tdebugger\n}\n"), 0644)
+
+	// 只 git add cleanFile
+	_ = exec.Command("git", "add", cleanFile).Run()
+
+	res = RunStagedAudit(tempDir, []string{cleanFile})
+	if res.HasErrors() {
+		t.Errorf("暂存区仅有干净代码，不应误报工作区未暂存的 dirty.go，但捕获到: %v", res.Violations)
+	}
+
+	// 3. 将 dirty.go 加入暂存区，预期精准拦截
+	_ = exec.Command("git", "add", dirtyWorktreeFile).Run()
+	res = RunStagedAudit(tempDir, []string{cleanFile, dirtyWorktreeFile})
+	if !res.HasErrors() {
+		t.Errorf("dirty.go 加入暂存区后预期被拦截，但未检测出错误")
+	}
+
+	// 4. 将 TASK.md 私有文件加入暂存区，预期私有文件泄露拦截
+	taskFile := "TASK.md"
+	_ = os.WriteFile(taskFile, []byte("# My private task"), 0644)
+	_ = exec.Command("git", "add", taskFile).Run()
+	res = RunStagedAudit(tempDir, []string{taskFile})
+	if !res.HasErrors() {
+		t.Errorf("暂存区包含 TASK.md 预期被拦截，但未检测出错误")
 	}
 }
 
