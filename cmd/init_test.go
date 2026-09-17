@@ -31,7 +31,7 @@ func TestInitCmdSuccess(t *testing.T) {
 	// 验证必要文件生成
 	requiredFiles := []string{
 		".ignore",
-		"AGENTS.md",
+		"MAP.md",
 		filepath.Join("contexts", "context.md"),
 		"TASK.md",
 		"MEMORY.md",

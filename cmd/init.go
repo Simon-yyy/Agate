@@ -24,7 +24,7 @@ var initCmd = &cobra.Command{
 - 生成 .ignore 索引过滤，避免文件检索爆仓；
 - 配置 .git/info/exclude 私有追踪隔离，防止 AI 元数据污染 Git 提交；
 - 分发单一事实源规约至 Codex / Cursor / Antigravity / Claude / Windsurf 等目标；
-- 生成 AGENTS.md 模块地图与 contexts/context.md 契约骨架；
+- 生成 MAP.md 模块地图与 contexts/context.md 契约骨架；
 - 挂载本地 Git pre-commit 闭环门禁。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pwd, err := os.Getwd()
@@ -54,10 +54,10 @@ var initCmd = &cobra.Command{
 		}
 
 		// 3. 先生成 Codex 会读取的架构地图与技术契约，随后再写入受管规则区块
-		if created, err := harness.EnsureAgentsMap(projectName); err != nil {
+		if created, err := harness.EnsureMap(projectName); err != nil {
 			return err
 		} else if created {
-			fmt.Println("  \033[92m[+] 已生成 AGENTS.md 骨架\033[0m")
+			fmt.Println("  \033[92m[+] 已生成 MAP.md 架构地图骨架\033[0m")
 		}
 
 		if created, err := harness.EnsureContext(); err != nil {
@@ -120,7 +120,7 @@ var initCmd = &cobra.Command{
 		fmt.Println("\033[93m💡 后续协同建议：\033[0m")
 		fmt.Println("  1. 规约已在本地注入生效，在此项目中与 AI 对话将默认遵守“方案对齐 + 闭环自检”安全门禁；")
 		fmt.Println("  2. (可选冷启动) 如需为 AI 注入全局架构认知，可向 AI 发送：")
-		fmt.Println("     \033[96m“阅读 AGENTS.md 骨架，结合当前代码目录，简要补齐各模块核心职责与关键入口。”\033[0m")
+		fmt.Println("     \033[96m“阅读 MAP.md 与 contexts/context.md，结合当前代码目录，简要补齐各模块核心职责与关键入口。”\033[0m")
 		return nil
 	},
 }

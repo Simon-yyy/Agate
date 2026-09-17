@@ -13,7 +13,7 @@
   - `agate verify [--staged] [--strict] [--skip-guard] [--report]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断；支持 `--report` 自动生成 HTML 审查报告；
   - `agate export [-o <path>] [--open] [--staged]`: 汇聚安全审计、Diff 对比、任务与自检日志，编译自包含单文件 HTML 审查报告；
   - `agate view`: 在系统默认浏览器中一键预览最新生成的 HTML 审查报告；
-  - `agate scan [--write]`: 智能扫描工程技术栈与端口矩阵，支持确定性排序回填 AGENTS.md 与 contexts/context.md；
+  - `agate scan [--write]`: 智能扫描工程技术栈与端口矩阵，支持确定性排序回填 MAP.md 与 contexts/context.md；
   - `agate hook [install|uninstall|status]`: 管理本地 Git 双重门禁（pre-commit 提纯自检 + pre-push 物理防偷跑）与状态看板；
   - `agate task [status|claim|handover|resume|done]`: 跨 Agent 任务接力中枢，管理 TASK.md 状态机流转、租约互斥锁、交接四要素与流转审计时间线。
 - **自举验证契约**:

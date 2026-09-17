@@ -37,7 +37,7 @@
 +---------------------------------------v---------------------------------------+
 |                            本地 Git & 物理文件系统层                          |
 |  - 私有跟踪隔离 (.git/info/exclude)        - 提交硬门禁 (.git/custom-hooks)        |
-|  - 闭环验证执行器 (agate verify)           - 架构地图资产 (AGENTS.md / contexts)    |
+|  - 闭环验证执行器 (agate verify)           - 架构地图资产 (MAP.md / contexts)       |
 +-------------------------------------------------------------------------------+
 ```
 
@@ -96,7 +96,7 @@ agate/
 │   │   └── browser.go      # 跨平台系统浏览器拉起实现 (xdg-open / open / start)
 │   └── harness/
 │       ├── fs.go           # 跨平台软链、拷贝降级与崩溃安全原子写 (WriteFileAtomic)
-│       └── scaffold.go     # AGENTS.md / contexts / TASK / MEMORY 骨架初始化
+│       └── scaffold.go     # MAP.md / contexts / TASK / MEMORY 骨架初始化
 ├── internal/
 │   └── templates/
 │       ├── embed.go        # go:embed 静态资源声明
@@ -104,7 +104,7 @@ agate/
 │       ├── task.tpl        # YAML Frontmatter + 接力四要素任务看板模板
 │       ├── SKILL.md        # 核心 AI 协同规约 (SSOT)
 │       ├── ignore.tpl      # .ignore 索引防爆仓模板
-│       ├── agents.tpl      # AGENTS.md 初始骨架模板
+│       ├── agents.tpl      # MAP.md 初始骨架模板
 │       ├── context.tpl     # contexts/context.md 技术契约模板
 │       └── memory.tpl      # MEMORY.md 长期记忆模板
 ├── vendor/                 # 离线打包依赖
@@ -242,7 +242,7 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
 - [x] `agate verify` 自检门禁与本地 `pre-commit` 拦截。
 
 ### Phase 2: 动态架构地图与多 Agent 接力（已完成落地）
-- [x] `agate scan`：自动解析项目 `pom.xml`、`package.json`、`go.mod` 等，自动丰富 `AGENTS.md` 端口拓扑；
+- [x] `agate scan`：自动解析项目 `pom.xml`、`package.json`、`go.mod` 等，自动丰富 `MAP.md` 端口拓扑；
 - [x] `agate task`：跨 Agent 协同接力看板、并发租约锁与四要素状态机驱动；
 - [x] `agate export` & `agate view`：自包含 HTML 审查物证报告导出与极速预览；
 - [x] 两振熔断机制（Two-Strike Circuit Breaker）：物理失败计数器与终端红框拦截；

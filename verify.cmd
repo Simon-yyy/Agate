@@ -16,8 +16,8 @@ if not exist "vendor\modules.txt" (
     echo [FAIL] 缺少核心架构依赖: vendor\modules.txt
     exit /b 1
 )
-if not exist "AGENTS.md" (
-    echo [FAIL] 缺少导航地图文件: AGENTS.md
+if not exist "MAP.md" (
+    echo [FAIL] 缺少导航地图文件: MAP.md
     exit /b 1
 )
 if not exist "contexts\context.md" (

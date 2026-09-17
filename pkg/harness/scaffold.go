@@ -27,9 +27,9 @@ func EnsureIgnore() (bool, error) {
 	return true, nil
 }
 
-// EnsureAgentsMap 生成架构地图骨架 AGENTS.md
-func EnsureAgentsMap(projectName string) (bool, error) {
-	if _, err := os.Stat("AGENTS.md"); err == nil {
+// EnsureMap 生成项目架构地图骨架 MAP.md。
+func EnsureMap(projectName string) (bool, error) {
+	if _, err := os.Stat("MAP.md"); err == nil {
 		return false, nil // 已存在
 	}
 
@@ -43,11 +43,14 @@ func EnsureAgentsMap(projectName string) (bool, error) {
 		return false, fmt.Errorf("渲染 agents.tpl 失败: %w", err)
 	}
 
-	if err := WriteFileAtomic("AGENTS.md", buf.Bytes(), 0644); err != nil {
-		return false, fmt.Errorf("写入 AGENTS.md 失败: %w", err)
+	if err := WriteFileAtomic("MAP.md", buf.Bytes(), 0644); err != nil {
+		return false, fmt.Errorf("写入 MAP.md 失败: %w", err)
 	}
 	return true, nil
 }
+
+// EnsureAgentsMap 保留兼容旧调用方；新代码应使用 EnsureMap。
+func EnsureAgentsMap(projectName string) (bool, error) { return EnsureMap(projectName) }
 
 // EnsureContext 生成工程技术上下文基线 contexts/context.md
 func EnsureContext() (bool, error) {

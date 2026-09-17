@@ -174,7 +174,7 @@ const (
 	codexRulesEnd   = "<!-- agate:codex-rules:end -->"
 )
 
-// updateCodexRules 仅更新 AGENTS.md 中 Agate 受管区块，保留用户架构地图。
+// updateCodexRules 仅更新 AGENTS.md 中 Agate 受管区块，架构地图位于 MAP.md。
 func updateCodexRules(path string, rules []byte) error {
 	existingBytes, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {

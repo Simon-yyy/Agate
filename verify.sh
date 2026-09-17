@@ -4,7 +4,7 @@ set -e
 echo "=== [Agate 本地自检] ==="
 
 # 1. 核心架构文件完备性检查
-for f in "main.go" "go.mod" "vendor/modules.txt" "AGENTS.md" "contexts/context.md"; do
+for f in "main.go" "go.mod" "vendor/modules.txt" "MAP.md" "contexts/context.md"; do
     if [ ! -f "$f" ]; then
         echo "[FAIL] 缺少核心架构文件: $f"
         exit 1

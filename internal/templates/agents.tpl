@@ -1,4 +1,4 @@
-# 项目模块地图 (Agent Navigation)
+# 项目模块地图 (MAP.md / Agent Navigation)
 
 ## 一、 项目架构与工程定位
 本项目为 **{{.ProjectName}}**。

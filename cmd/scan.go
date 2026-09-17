@@ -28,7 +28,7 @@ var scanCmd = &cobra.Command{
 	Long: `智能扫描当前代码库中的描述文件与配置文件：
 - 识别技术栈（Maven/Spring Boot、npm/前端框架、Go、Python等）；
 - 检索端口配置（server.port、vite port、.env 等）；
-- 输出架构拓扑报告，支持通过 --write 自动丰富 AGENTS.md 与 contexts/context.md。`,
+- 输出架构拓扑报告，支持通过 --write 自动丰富 MAP.md 与 contexts/context.md。`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("=== [agate scan] 正在深度扫描工程技术拓扑 ===")
 
@@ -67,7 +67,7 @@ var scanCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Println("\n💡 提示：运行 `agate scan --write` 可将上述扫描结果自动合并回填至 AGENTS.md 与 contexts/context.md")
+		fmt.Println("\n💡 提示：运行 `agate scan --write` 可将上述扫描结果自动合并回填至 MAP.md 与 contexts/context.md")
 		return nil
 	},
 }
@@ -146,9 +146,14 @@ func extractPortFromFile(path string, re *regexp.Regexp) string {
 }
 
 func appendTopologyToAgents(topo *ProjectTopology) error {
-	agentsFile := "AGENTS.md"
+	agentsFile := "MAP.md"
 	if _, err := os.Stat(agentsFile); os.IsNotExist(err) {
-		return fmt.Errorf("未找到 AGENTS.md，请先执行 agate init")
+		// 兼容尚未迁移的旧项目。
+		if _, legacyErr := os.Stat("AGENTS.md"); legacyErr == nil {
+			agentsFile = "AGENTS.md"
+		} else {
+			return fmt.Errorf("未找到 MAP.md，请先执行 agate init")
+		}
 	}
 
 	content, err := os.ReadFile(agentsFile)
@@ -195,10 +200,10 @@ func appendTopologyToAgents(topo *ProjectTopology) error {
 	}
 
 	if err := os.WriteFile(agentsFile, []byte(finalContent), 0644); err != nil {
-		return fmt.Errorf("写入 AGENTS.md 失败: %w", err)
+		return fmt.Errorf("写入 MAP.md 失败: %w", err)
 	}
 
-	fmt.Println("  \033[92m[+] 扫描结果已成功合并回填至 AGENTS.md\033[0m")
+	fmt.Printf("  \033[92m[+] 扫描结果已成功合并回填至 %s\033[0m\n", agentsFile)
 	return nil
 }
 
@@ -261,6 +266,6 @@ func appendTopologyToContext(topo *ProjectTopology) error {
 }
 
 func init() {
-	scanCmd.Flags().BoolVarP(&flagWriteScan, "write", "w", false, "将扫描出的技术拓扑自动回填至 AGENTS.md 与 contexts/context.md")
+	scanCmd.Flags().BoolVarP(&flagWriteScan, "write", "w", false, "将扫描出的技术拓扑自动回填至 MAP.md 与 contexts/context.md")
 	rootCmd.AddCommand(scanCmd)
 }
