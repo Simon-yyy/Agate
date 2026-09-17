@@ -32,24 +32,59 @@ func TestCatchHardcodedPaths(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// 注入写死的路径反例
+	// 注入写死的路径反例 (Windows 盘符路径 + Unix /home 路径)
 	dirtyScript := filepath.Join(tempDir, "run.cmd")
 	_ = os.WriteFile(dirtyScript, []byte("@echo off\nset PATH=C:\\Users\\Admin\\bin;%PATH%\n"), 0644)
+
+	dirtyGo := filepath.Join(tempDir, "user_path.go")
+	_ = os.WriteFile(dirtyGo, []byte("package main\nvar p = \"/home/admin/secret_data.txt\"\n"), 0644)
 
 	res := RunPreflightAudit(tempDir)
 	if !res.HasErrors() {
 		t.Errorf("未能成功捕获硬编码个人绝对路径")
 	}
 
-	found := false
+	count := 0
 	for _, v := range res.Violations {
 		if v.Category == "机器绝对路径泄露" {
-			found = true
-			break
+			count++
 		}
 	}
-	if !found {
-		t.Errorf("未按预期分类为'机器绝对路径泄露'")
+	if count < 2 {
+		t.Errorf("未按预期同时捕获 Windows 与 Unix 机器绝对路径泄露，实际捕获 %d 处", count)
+	}
+}
+
+func TestAuditHardcodedPathsWhitelistedSystemPaths(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-whitelist-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 注入合法 POSIX 系统资源路径 (/dev/null, /tmp/..., /var/run/...)
+	cleanCode := filepath.Join(tempDir, "system_call.go")
+	content := `package main
+
+import "os"
+
+func run() {
+	_, _ = os.OpenFile("/dev/null", os.O_WRONLY, 0)
+	_, _ = os.OpenFile("/dev/zero", os.O_RDONLY, 0)
+	_, _ = os.OpenFile("/dev/urandom", os.O_RDONLY, 0)
+	sock := "/tmp/myapp.sock"
+	pidFile := "/var/run/daemon.pid"
+	_ = sock
+	_ = pidFile
+}
+`
+	_ = os.WriteFile(cleanCode, []byte(content), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	for _, v := range res.Violations {
+		if v.Category == "机器绝对路径泄露" {
+			t.Errorf("合法的标准系统路径不应被误判拦截: %s:%d %s", v.File, v.LineNumber, v.Message)
+		}
 	}
 }
 
@@ -499,6 +534,97 @@ func TestMaskSensitiveLine(t *testing.T) {
 		if got != c.expected {
 			t.Errorf("maskSensitiveLine(%q) = %q, expected %q", c.input, got, c.expected)
 		}
+	}
+}
+
+func TestDocImageAllowedAndSourceImageBlocked(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-img-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	if err := exec.Command("git", "init").Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 1. 在 docs/ 目录下写入一个 200KB 的合法架构图（>50KB，但 <2MB）
+	_ = os.MkdirAll("docs", 0755)
+	docImgData := make([]byte, 200*1024)
+	docImgPath := filepath.Join("docs", "architecture.png")
+	if err := os.WriteFile(docImgPath, docImgData, 0644); err != nil {
+		t.Fatalf("写入文档图片失败: %v", err)
+	}
+	_ = exec.Command("git", "add", docImgPath).Run()
+
+	// 2. 在 src/ 源码目录下写入一个 60KB 的图片（>50KB，属于误放源码）
+	_ = os.MkdirAll("src", 0755)
+	srcImgData := make([]byte, 60*1024)
+	srcImgPath := filepath.Join("src", "huge_icon.png")
+	if err := os.WriteFile(srcImgPath, srcImgData, 0644); err != nil {
+		t.Fatalf("写入源码图片失败: %v", err)
+	}
+
+	// 仅检查 docs 目录图片时，不应被视为错误 (AG-010)
+	resDoc := RunPreflightAudit(tempDir)
+	hasDocError := false
+	for _, v := range resDoc.Violations {
+		if v.File == filepath.ToSlash(docImgPath) && v.Level == "ERROR" {
+			hasDocError = true
+		}
+	}
+	if hasDocError {
+		t.Errorf("docs/ 目录下的 200KB 合法架构图预期不被 ERROR 拦截，但被拦截: %v", resDoc.Violations)
+	}
+
+	// 源码目录下的图片预期被 ERROR 拦截
+	hasSrcError := false
+	for _, v := range resDoc.Violations {
+		if v.File == filepath.ToSlash(srcImgPath) && v.Level == "ERROR" {
+			hasSrcError = true
+		}
+	}
+	if !hasSrcError {
+		t.Errorf("src/ 源码目录下的 60KB 图片预期被 ERROR 拦截，但未检测出违规")
+	}
+}
+
+func TestGitContextBatchIgnoredPerformance(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-perf-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	if err := exec.Command("git", "init").Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 写入 .gitignore 忽略 temp_build/
+	_ = os.WriteFile(".gitignore", []byte("temp_build/\n*.log\n"), 0644)
+	_ = os.MkdirAll("temp_build", 0755)
+	_ = os.WriteFile(filepath.Join("temp_build", "artifact.bin"), []byte("bin"), 0644)
+	_ = os.WriteFile("debug.log", []byte("log"), 0644)
+
+	ctx := newGitContext(tempDir)
+	if !ctx.isGitRepo {
+		t.Fatalf("预期识别为 Git 仓库")
+	}
+
+	// 验证批量已加载 ignoredCache (AG-024)
+	if !ctx.isIgnored("debug.log") {
+		t.Errorf("debug.log 预期被识别为忽略")
+	}
+	if !ctx.isIgnored("temp_build/artifact.bin") {
+		t.Errorf("temp_build/artifact.bin 预期被识别为忽略")
 	}
 }
 

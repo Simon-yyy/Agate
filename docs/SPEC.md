@@ -43,7 +43,11 @@
 
 ```text
 # --- agate private tracking start ---
+.env
+.env.*
+.env.local
 .gemini/
+.cursor/
 .agents/
 .ai-memory/
 .cursorrules
@@ -63,9 +67,9 @@ logs/
    - `AGENTS.md`：项目架构与模块拓扑地图（供所有人及 AI 共享）；
    - `contexts/context.md`：团队约定的技术契约与运行约束。
 2. **私有状态资产（本地排除）**：
-   - 个人 AI 会话记录、Memory 记忆卡片、临时 Task 进度追踪等。
+   - 个人 AI 会话记录、Memory 记忆卡片、临时 Task 进度追踪、本地环境变量（`.env*`）等。
 3. **幂等性与零污染契约**：
-   - **块级防破坏追加**：写入 `.git/info/exclude` 时必须使用包含标记符（`# --- agate private tracking start ---` 与 `# --- agate private tracking end ---`）的专用块，绝不覆写用户原有的排除配置；
+   - **块级防破坏追加**：写入 `.git/info/exclude` 时必须使用包含标记符（`# --- agate private tracking start ---` 与 `# --- agate private tracking end ---`）的专用受管块，新追加项精准插入在 end 标记内侧，绝不覆写用户原有的排除配置；
    - **完全本地生效**：`.git/info/exclude` 仅在开发者本地 `.git` 目录生效，不进版本库，不修改项目公共 `.gitignore`，杜绝协同 Diff 噪音。
 
 ---
@@ -73,13 +77,17 @@ logs/
 ## 三、 Git Hook 门禁安装与防篡改策略 (M4 规范)
 
 ### 3.1 拦截阶段与职责
-- **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify`（Phase 0 前置红线审计与测试），防止脏代码、绝对路径或私有配置被 Git 提交；
-- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。
+- **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify --staged`。直接从 Git Index（暂存区）提取待提交文件并通过 `git show :<path>` 针对性审查，毫秒级快速就绪，精准拦截私有密钥、超大文件、机器硬编码绝对路径、未完工占位符等违规内容，工作区脏文件不产生误拦；
+- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端中，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 环境变量白名单才准予进入全量验证并放行。
 
 ### 3.2 Hook 安装与防篡改策略
 1. **非破坏性备份**：若检测到开发者已有同名 Hook，必须自动重命名备份（如 `pre-commit.agate.bak`），严禁静默覆盖；
 2. **标记行识别**：写入的脚本必须带有 `# --- agate hook: <type> ---` 专用标识行；
-3. **精准清理还原**：在执行卸载或移除时，仅精准移除由 agate 管理的钩子并还原原备份脚本。
+3. **精准清理还原**：在执行卸载或移除时，仅精准移除由 agate 管理的钩子并还原原备份脚本，完好保留用户自定义钩子；
+4. **规约与原子安全落盘**：向工作区分发规约（如 `.cursorrules`）时，内容一致免写，存在不同既有内容时自动备份为 `[文件名].agate.bak`，并通过临时文件 + `fsync` + `rename` 真原子落盘（崩溃安全）。
+
+### 3.3 状态可观测性
+- 支持通过 `agate hook status` 结构化查询 `core.hooksPath`、`pre-commit` 与 `pre-push` 托管状态，提供开箱即用的门禁可视看板。
 
 ---
 
@@ -140,3 +148,39 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 [PASS] 本地交付物校验通过，结构完备 (耗时: 264ms)
 所有修改符合门禁要求，已具备交付条件。
 ```
+
+---
+
+## 六、 自包含单文件 HTML 审查报告规范 (Self-contained Transcript)
+
+### 6.1 审查载体设计规范
+针对人类审查、合规归档与异步复盘场景，`agate export` 与 `agate view` 遵循如下标准：
+1. **零外部网络依赖**：禁止引用外部 CDN 样式、字体或远程脚本，单文件必须内嵌完整 CSS 与轻量 JS，双击即开；
+2. **长文本与日志折叠**：原生使用 `<details>/<summary>` 对任务目标、测试控制台日志、技术契约与 Diff 差异进行层级折叠；
+3. **红绿对比与安全体检**：高维直观呈现本次改动的 `git diff`（支持暂存区/工作区差异）以及 Phase 0 7 大安全卡口扫描细节；
+4. **隐形存储隔离**：默认写入 `.ai-memory/reviews/review-<timestamp>.html`，天然受 `.git/info/exclude` 隐形隔离，保障业务仓库 100% 零污染。
+
+---
+
+## 七、 跨 Agent 任务接力与记忆治理规范 (Agate Relay)
+
+### 7.1 双模任务接力单规范 (TASK.md)
+1. **YAML Frontmatter 状态机**：必须包含 `task_id`、`title`、`status` (TODO/CLAIMED/IN_PROGRESS/BLOCKED/HANDOVER_READY/DONE)、`current_agent`、`next_agent`、`receipt_html` 与 `updated_at`；通过 `agate task claim / handover / resume / done` 进行严密状态机驱动；
+2. **接力四要素 (Handover Quartet)**：正文必须结构化包含【已完成事项】、【在途断点】、【接棒建议与下一步】以及【暗坑警示】；
+3. **互斥软租约锁**：多 Agent 施工通过 `.ai-memory/locks/task.lock` 互斥保护，默认 2 小时租约，防范跨 IDE 并发破坏性改动。
+
+### 7.2 记忆资产分层治理 (Memory Governance)
+1. **L0 任务级临时记忆**：偶发报错、临时网络状态与在途断点仅允许记录于 `TASK.md`，交接或任务归档后自然消亡，严禁全局泛化；
+2. **L1 长期工程记忆**：`MEMORY.md` 仅允许人类显式指令沉淀，Agent 默认绝对只读；遇到重大通用架构暗坑仅可发起“提议”，由人类确认后单次追加。
+
+---
+
+## 八、 命名空间与专属品牌规范 (Namespace & Brand Standard)
+
+### 8.1 唯一专有命名空间
+系统在架构设计、命令行接口、Git Hook 门禁及配置路径上全面统一使用 `agate`（Agent Gate）专有品牌与命名空间，严禁保留历史旧别名：
+1. **CLI 命令与二进制**：全局仅使用 `agate` 独立可执行二进制；Git Hook 物理门禁（`pre-commit` / `pre-push`）仅识别并调用 `agate`；
+2. **私有隔离标识**：`.git/info/exclude` 仅使用 `# agate private tracking start` 与 `# agate private tracking end` 规范标记块；
+3. **全局规约路径**：规约探测引擎标准候选路径为 `~/.config/agate/rules.md` 与 `~/.agate/rules.md`。
+
+

@@ -242,3 +242,44 @@ my-notes.txt
 		t.Errorf("幂等重新写入预期 0，实际: %d, err: %v", count2, err)
 	}
 }
+
+func TestGetRepoRootSubdirectoryResolution(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-git-root-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	if err := exec.Command("git", "init").Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 1. 在根目录下解析
+	root, err := GetRepoRoot()
+	if err != nil {
+		t.Fatalf("根目录下 GetRepoRoot 失败: %v", err)
+	}
+	realTempDir, _ := filepath.EvalSymlinks(tempDir)
+	realRoot, _ := filepath.EvalSymlinks(root)
+	if realRoot != realTempDir {
+		t.Errorf("根目录解析不一致，预期 %s，实际 %s", realTempDir, realRoot)
+	}
+
+	// 2. 创建深度子目录并在子目录内解析 (AG-016)
+	subDir := filepath.Join(tempDir, "pkg", "deep", "module")
+	_ = os.MkdirAll(subDir, 0755)
+
+	_ = os.Chdir(subDir)
+	subResolved, err := GetRepoRoot()
+	if err != nil {
+		t.Fatalf("子目录下 GetRepoRoot 失败: %v", err)
+	}
+	realSubResolved, _ := filepath.EvalSymlinks(subResolved)
+	if realSubResolved != realTempDir {
+		t.Errorf("从子目录解析顶层根目录失败，预期 %s，实际 %s", realTempDir, realSubResolved)
+	}
+}

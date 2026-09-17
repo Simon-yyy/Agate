@@ -20,6 +20,10 @@ if not exist "AGENTS.md" (
     echo [FAIL] 缺少导航地图文件: AGENTS.md
     exit /b 1
 )
+if not exist "contexts\context.md" (
+    echo [FAIL] 缺少技术契约文件: contexts\context.md
+    exit /b 1
+)
 
 :: 2. Auto detect Go compiler (Support custom GO_BIN, system PATH or GOROOT)
 set "HAS_GO=0"

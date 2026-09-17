@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +36,26 @@ func initTestGitRepo(t *testing.T) (string, func()) {
 		t.Fatalf("切换工作目录失败: %v", err)
 	}
 
+	// 强制重置全局命令参数与 Flag，确保测试状态彻底隔离 (AG-021)
+	resetGlobalFlags := func() {
+		rootCmd.SetArgs(nil)
+		flagSkipGuard = false
+		flagStrict = false
+		flagStaged = false
+		flagReport = false
+		flagExportOutput = ""
+		flagExportOpen = false
+		flagExportStaged = false
+		flagTaskAgent = ""
+		flagTaskForce = false
+		flagTaskNextAgent = "any"
+		flagTaskNote = ""
+		flagTaskSkipVerify = false
+	}
+	resetGlobalFlags()
+
 	cleanup := func() {
+		resetGlobalFlags()
 		_ = os.Chdir(oldWd)
 		_ = os.RemoveAll(tempDir)
 	}
@@ -170,6 +190,69 @@ func TestVerifyCmdStagedMode(t *testing.T) {
 	err = rootCmd.Execute()
 	if err == nil {
 		t.Errorf("暂存区存在违规代码时 verify --staged 预期拦截失败，但返回了 nil")
+	}
+}
+
+func TestVerifyCmdRunsFromSubdirectory(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+
+	// 根目录下放置自定义 verify.sh 脚本
+	verifyScript := filepath.Join(tempDir, "verify.sh")
+	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	// 创建深层子目录并在子目录中调用 verify (AG-016)
+	subDir := filepath.Join(tempDir, "pkg", "core")
+	_ = os.MkdirAll(subDir, 0755)
+	_ = os.Chdir(subDir)
+
+	rootCmd.SetArgs([]string{"verify"})
+	err := rootCmd.Execute()
+	if err != nil {
+		t.Errorf("从子目录执行 verify 预期自动寻径到根目录并成功调度 verify.sh，但返回错误: %v", err)
+	}
+}
+
+func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+
+	// 注入失败的自检脚本
+	verifyScript := filepath.Join(tempDir, "verify.sh")
+	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 1\n"), 0755)
+
+	// Strike 1: 第一次失败
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"verify"})
+	_ = rootCmd.Execute()
+
+	if strings.Contains(buf.String(), "两振熔断警示") {
+		t.Errorf("第一次失败时不应触发两振熔断警示")
+	}
+
+	// Strike 2: 第二次连续失败 -> 必须触发两振熔断警示
+	buf.Reset()
+	rootCmd.SetArgs([]string{"verify"})
+	_ = rootCmd.Execute()
+
+	if !strings.Contains(buf.String(), "两振熔断警示") || !strings.Contains(buf.String(), "连续失败第 2 次") {
+		t.Errorf("连续第二次失败预期触发两振熔断警示，实际输出: %s", buf.String())
+	}
+
+	// 修复脚本，变为通过
+	_ = os.WriteFile(verifyScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	buf.Reset()
+	rootCmd.SetArgs([]string{"verify"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("自检通过执行失败: %v", err)
+	}
+
+	// 计数文件应被自动清理重置
+	streakFile := filepath.Join(tempDir, ".ai-memory", ".verify_streak")
+	if _, err := os.Stat(streakFile); !os.IsNotExist(err) {
+		t.Errorf("自检成功后计数文件应被清除重置")
 	}
 }
 

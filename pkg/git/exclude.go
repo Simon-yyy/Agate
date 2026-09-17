@@ -89,9 +89,29 @@ func IsGitRepo() bool {
 	return err == nil
 }
 
+// GetRepoRoot 解析当前工程的 Git 顶级工作区根目录（兼容普通仓、Submodule 与 Worktree，解决子目录执行时的寻径耦合 AG-016）
+func GetRepoRoot(dir ...string) (string, error) {
+	base := "."
+	if len(dir) > 0 && dir[0] != "" {
+		base = dir[0]
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = base
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("无法获取 Git 仓库根目录: %w", err)
+	}
+	res := strings.TrimSpace(string(out))
+	if res == "" {
+		return "", fmt.Errorf("Git 仓库根目录为空")
+	}
+	return filepath.Clean(res), nil
+}
+
 // ApplyPrivateExclusions 向 Git 的 info/exclude 注入隔离清单（原生兼容主仓与 Worktree）
-func ApplyPrivateExclusions(items []string) (int, error) {
-	gitCommonDir, err := GetGitCommonDir()
+func ApplyPrivateExclusions(items []string, dir ...string) (int, error) {
+	gitCommonDir, err := GetGitCommonDir(dir...)
 	if err != nil {
 		return 0, nil // 非 Git 仓库，跳过
 	}
@@ -119,9 +139,9 @@ func ApplyPrivateExclusions(items []string) (int, error) {
 			trimmed := strings.TrimSpace(rawLine)
 			existingLines = append(existingLines, rawLine)
 
-			if strings.Contains(trimmed, "agate private tracking start") || strings.Contains(trimmed, "adh private tracking start") {
+			if strings.Contains(trimmed, "agate private tracking start") {
 				startMarkerIdx = idx
-			} else if strings.Contains(trimmed, "agate private tracking end") || strings.Contains(trimmed, "adh private tracking end") {
+			} else if strings.Contains(trimmed, "agate private tracking end") {
 				endMarkerIdx = idx
 			}
 

@@ -1,9 +1,13 @@
 # `agate verify` 前置护栏误报分析报告
 
+> [!NOTE]
+> **【历史归档说明 / AG-026 结论声明】**
+> 本分析报告产出并定稿于早期原型阶段。报告中所述的“无测试用例”、“无逃生开关（`--skip-guard`）”、“`.github/` 与 `testdata/` 目录误拦”、“非 Git 目录退化”等问题，在后续的多轮迭代中已全部通过正式测试用例与系统重构彻底修复闭环。
+> 本文档目前仅作为项目演进过程的历史备忘归档保留，**不再代表系统当前现状**。当前系统的实际能力请以 [docs/SPEC.md](SPEC.md) 与 [docs/DESIGN.md](DESIGN.md) 为准。
+
 > **审查对象**：HarnessGate（agate CLI）verify 命令
 > **审查链路**：`cmd/verify.go`（Phase 0 调度）→ `pkg/guard/preflight.go`（全部审计规则）
-> **关联文档**：[CODE_REVIEW.md](CODE_REVIEW.md)（整体代码审查报告）
-> **核心结论**：会误报，且一旦命中 ERROR 即 `os.Exit(1)` 整体拦截，无任何逃生开关。
+> **历史基准**：早期原型版本误报排查报告（当前已被 AG-001 ~ AG-028 缺陷治理全面取代）
 
 ---
 

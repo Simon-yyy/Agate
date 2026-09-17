@@ -166,7 +166,7 @@ func LoadGlobalRules() ([]byte, string, error) {
 
 	candidatePaths := []string{
 		filepath.Join(homeDir, ".agate", "rules.md"),
-		filepath.Join(homeDir, ".adh", "rules.md"),
+		filepath.Join(homeDir, ".config", "agate", "rules.md"),
 		filepath.Join(homeDir, "my_skills", "SKILL.md"),
 		filepath.Join(homeDir, ".gemini", "config", "SKILL.md"),
 	}

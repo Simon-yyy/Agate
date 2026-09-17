@@ -16,8 +16,6 @@ set -e
 
 if command -v agate >/dev/null 2>&1; then
     agate verify --staged || exit 1
-elif command -v adh >/dev/null 2>&1; then
-    adh verify || exit 1
 elif [ -f "./verify.cmd" ]; then
     cmd.exe //c "verify.cmd" || exit 1
 elif [ -f "./verify.sh" ]; then
@@ -44,15 +42,23 @@ if [ "$ALLOW_AUTOMATED_PUSH" = "1" ] || [ "$ALLOW_AUTOMATED_PUSH" = "true" ]; th
     is_authorized=1
 fi
 
-if [ "$is_authorized" -eq 0 ] && [ ! -t 1 ] && [ ! -t 2 ]; then
-    echo -e "\n\033[91m=================================================================\033[0m"
-    echo -e "\033[91m[BLOCKED] 触发 Agate pre-push 物理硬门禁拦截！\033[0m"
-    echo -e ">> 检测到当前处于非交互式终端/自动化脚本环境尝试执行 git push。"
-    echo -e ">> 安全保护：未获得人类用户显式授权，严禁任何 AI/脚本擅自偷跑推流！"
-    echo -e ">> 授权通道：唯有在用户明确指令推送时，声明 ALLOW_AUTOMATED_PUSH=1 方可执行；"
-    echo -e ">> 常规场景：请由人类用户在交互式终端中手动敲击 git push。"
-    echo -e "\033[91m=================================================================\033[0m\n"
-    exit 1
+# 增加 Agent/CI 自动化环境指纹检测 (防 PTY 伪终端伪造 TTY 绕过 RSK-001)
+is_agent_env=0
+if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$AI_AGENT" ]; then
+    is_agent_env=1
+fi
+
+if [ "$is_authorized" -eq 0 ]; then
+    if [ "$is_agent_env" -eq 1 ] || { [ ! -t 1 ] && [ ! -t 2 ]; }; then
+        echo -e "\n\033[91m=================================================================\033[0m"
+        echo -e "\033[91m[BLOCKED] 触发 Agate pre-push 物理硬门禁拦截！\033[0m"
+        echo -e ">> 检测到当前处于非交互终端或智能体自动化环境尝试执行 git push。"
+        echo -e ">> 安全保护：未获得人类用户显式授权，严禁任何 AI/脚本擅自偷跑推流！"
+        echo -e ">> 授权通道：唯有在用户明确指令推送时，声明 ALLOW_AUTOMATED_PUSH=1 方可执行；"
+        echo -e ">> 常规场景：请由人类用户在交互式终端中手动敲击 git push。"
+        echo -e "\033[91m=================================================================\033[0m\n"
+        exit 1
+    fi
 fi
 
 # 2. 终极自检与仓库纯净度检查

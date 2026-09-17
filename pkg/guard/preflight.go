@@ -103,6 +103,7 @@ type gitContext struct {
 	isGitRepo    bool
 	trackedMap   map[string]bool
 	ignoredCache map[string]bool
+	ignoredDirs  map[string]bool
 }
 
 func newGitContext(root string) *gitContext {
@@ -110,6 +111,7 @@ func newGitContext(root string) *gitContext {
 		root:         root,
 		trackedMap:   make(map[string]bool),
 		ignoredCache: make(map[string]bool),
+		ignoredDirs:  make(map[string]bool),
 	}
 
 	// 探测是否为 git 仓库
@@ -121,11 +123,10 @@ func newGitContext(root string) *gitContext {
 	}
 	ctx.isGitRepo = true
 
-	// 一次性批量加载已跟踪文件 (耗时约 10-20ms)
+	// 1. 一次性批量加载已跟踪文件 (耗时约 5-15ms)
 	lsCmd := exec.Command("git", "-c", "core.quotepath=false", "ls-files")
 	lsCmd.Dir = root
-	out, err := lsCmd.Output()
-	if err == nil {
+	if out, err := lsCmd.Output(); err == nil {
 		scanner := newSafeScanner(strings.NewReader(string(out)))
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -134,6 +135,26 @@ func newGitContext(root string) *gitContext {
 			}
 		}
 	}
+
+	// 2. 一次性批量加载已忽略文件与目录清单 (AG-024 关键优化，消除数百次 check-ignore 进程调用)
+	ignoredCmd := exec.Command("git", "-c", "core.quotepath=false", "ls-files", "--others", "-i", "--exclude-standard")
+	ignoredCmd.Dir = root
+	if out, err := ignoredCmd.Output(); err == nil {
+		scanner := newSafeScanner(strings.NewReader(string(out)))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				slash := filepath.ToSlash(line)
+				ctx.ignoredCache[slash] = true
+				// 记录其所有上级目录为已忽略目录
+				parts := strings.Split(slash, "/")
+				for i := 1; i < len(parts); i++ {
+					ctx.ignoredDirs[strings.Join(parts[:i], "/")] = true
+				}
+			}
+		}
+	}
+
 	return ctx
 }
 
@@ -152,9 +173,21 @@ func (c *gitContext) isIgnored(slashPath string) bool {
 	if c.trackedMap[slashPath] {
 		return false
 	}
-	if ignored, ok := c.ignoredCache[slashPath]; ok {
-		return ignored
+	// 内存精准命中
+	if c.ignoredCache[slashPath] {
+		return true
 	}
+	// 检查是否位于某个已包含被忽略文件的父级目录中
+	parts := strings.Split(slashPath, "/")
+	for i := 1; i < len(parts); i++ {
+		parent := strings.Join(parts[:i], "/")
+		if c.ignoredDirs[parent] {
+			c.ignoredCache[slashPath] = true
+			return true
+		}
+	}
+
+	// 缓存未命中时的保底单文件查询并持久化至缓存
 	cmd := exec.Command("git", "check-ignore", "-q", slashPath)
 	cmd.Dir = c.root
 	ignored := (cmd.Run() == nil)
@@ -251,6 +284,20 @@ func isCommonIgnoredDir(dirName string) bool {
 	}
 }
 
+// isDocOrAssetPath 判定是否为文档、静态资产或公开资源路径（合法图片存放地，提高大小容忍度至 2MB，避免误报，AG-010）
+func isDocOrAssetPath(slashPath string) bool {
+	lower := strings.ToLower(slashPath)
+	return strings.HasPrefix(lower, "docs/") ||
+		strings.HasPrefix(lower, "assets/") ||
+		strings.HasPrefix(lower, "static/") ||
+		strings.HasPrefix(lower, "public/") ||
+		strings.HasPrefix(lower, ".github/") ||
+		strings.Contains(lower, "/docs/") ||
+		strings.Contains(lower, "/assets/") ||
+		strings.Contains(lower, "/static/") ||
+		strings.Contains(lower, "/public/")
+}
+
 // auditBinaryAndLargeFiles 扫描非代码大文件与二进制资产
 func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext) {
 	forbiddenExts := map[string]string{
@@ -301,20 +348,35 @@ func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext)
 			return nil
 		}
 
-		// 图片文件大小检查 (超过 50KB 触发警告或拦截)
+		// 图片文件大小检查 (精细化区分文档资产与源码目录，AG-010)
 		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" {
 			tracked := gitCtx.isTracked(slashRel)
 			ignored := gitCtx.isIgnored(slashRel)
 
 			if tracked || !ignored {
-				if fi, err := d.Info(); err == nil && fi.Size() > 50*1024 {
-					res.Violations = append(res.Violations, Violation{
-						Level:      "ERROR",
-						Category:   "大文件图片拦截",
-						File:       slashRel,
-						Message:    fmt.Sprintf("图片文件过大 (%d KB > 50 KB)，严禁直接入库", fi.Size()/1024),
-						Suggestion: "请压缩图片、使用外部 CDN，或将其移至文档附件目录",
-					})
+				if fi, err := d.Info(); err == nil {
+					size := fi.Size()
+					if isDocOrAssetPath(slashRel) {
+						if size > 2*1024*1024 {
+							res.Violations = append(res.Violations, Violation{
+								Level:      "WARN",
+								Category:   "大文件图片提醒",
+								File:       slashRel,
+								Message:    fmt.Sprintf("文档图片较大 (%d KB > 2048 KB)，建议适当压缩或使用外部图床", size/1024),
+								Suggestion: "可使用 TinyPNG 等工具压缩，或将大图托管在 CDN",
+							})
+						}
+					} else {
+						if size > 50*1024 {
+							res.Violations = append(res.Violations, Violation{
+								Level:      "ERROR",
+								Category:   "大文件图片拦截",
+								File:       slashRel,
+								Message:    fmt.Sprintf("源码/根目录检测到大图片 (%d KB > 50 KB)，严禁直接入库", size/1024),
+								Suggestion: "请将图片移至 docs/ 或 assets/ 文档目录，或使用外部 CDN",
+							})
+						}
+					}
 				}
 			}
 		}
@@ -323,11 +385,62 @@ func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext)
 	})
 }
 
+// isWhitelistedSystemPath 检查提取到的绝对路径是否属于合法的标准系统路径
+func isWhitelistedSystemPath(p string) bool {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.Trim(p, "\"'`<>(),;[]{}")
+
+	whitelistExact := map[string]bool{
+		"/dev/null":    true,
+		"/dev/zero":    true,
+		"/dev/urandom": true,
+		"/dev/random":  true,
+		"/dev/stdout":  true,
+		"/dev/stderr":  true,
+		"/dev/stdin":   true,
+	}
+	if whitelistExact[p] {
+		return true
+	}
+
+	whitelistPrefixes := []string{
+		"/dev/",
+		"/tmp",
+		"/var/tmp",
+		"/var/run",
+		"/proc/",
+		"/sys/",
+	}
+	for _, prefix := range whitelistPrefixes {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") || strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	winMachinePathRegex = regexp.MustCompile(`(?i)[a-zA-Z]:[\\/](?:Users|hclaw|code_files|Software|AppData)[\\/][^\s"'` + "`" + `<>]+`)
+	unixUserPathRegex   = regexp.MustCompile(`/(?:home|Users)/[a-zA-Z0-9_.-]+/[^\s"'` + "`" + `<>]+`)
+)
+
+// findHardcodedMachinePath 匹配代码行中的个人机器绝对路径，并自动排除合法的标准系统资源路径
+func findHardcodedMachinePath(line string) string {
+	// 1. 匹配 Windows 盘符型机器路径
+	if m := winMachinePathRegex.FindString(line); m != "" {
+		return m
+	}
+	// 2. 匹配 Unix / macOS 个人主目录型路径 (如 /home/user/... 或 /Users/user/...)
+	if m := unixUserPathRegex.FindString(line); m != "" {
+		if !isWhitelistedSystemPath(m) {
+			return m
+		}
+	}
+	return ""
+}
+
 // auditHardcodedPaths 扫描代码中写死的个人开发机绝对路径
 func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext) {
-	// 匹配类似 C:\Users\xxx 或 D:\hclaw\ 等典型机器绝对路径
-	pathRegex := regexp.MustCompile(`(?i)[a-zA-Z]:[\\/](?:Users|hclaw|code_files|Software|AppData)[\\/][^\s"'` + "`" + `<>]+`)
-
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -382,7 +495,7 @@ func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext) {
 				continue
 			}
 
-			if matches := pathRegex.FindString(line); matches != "" {
+			if matches := findHardcodedMachinePath(line); matches != "" {
 				res.Violations = append(res.Violations, Violation{
 					Level:       "ERROR",
 					Category:    "机器绝对路径泄露",
@@ -715,17 +828,29 @@ func RunStagedAudit(root string, stagedFiles []string) *AuditResult {
 			continue
 		}
 
-		// 4. 图片文件大小检查 (> 50KB 阻断)
+		// 4. 图片文件大小检查 (精细化区分文档资产与源码目录，AG-010)
 		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" {
 			size := getStagedFileSize(root, slashPath)
-			if size > 50*1024 {
-				res.Violations = append(res.Violations, Violation{
-					Level:      "ERROR",
-					Category:   "大文件图片拦截",
-					File:       slashPath,
-					Message:    fmt.Sprintf("图片文件过大 (%d KB > 50 KB)，严禁直接入库", size/1024),
-					Suggestion: "请压缩图片、使用外部 CDN，或将其移至文档附件目录",
-				})
+			if isDocOrAssetPath(slashPath) {
+				if size > 2*1024*1024 {
+					res.Violations = append(res.Violations, Violation{
+						Level:      "WARN",
+						Category:   "大文件图片提醒",
+						File:       slashPath,
+						Message:    fmt.Sprintf("文档图片较大 (%d KB > 2048 KB)，建议适当压缩或使用外部图床", size/1024),
+						Suggestion: "可使用 TinyPNG 等工具压缩，或将大图托管在 CDN",
+					})
+				}
+			} else {
+				if size > 50*1024 {
+					res.Violations = append(res.Violations, Violation{
+						Level:      "ERROR",
+						Category:   "大文件图片拦截",
+						File:       slashPath,
+						Message:    fmt.Sprintf("源码/根目录检测到大图片 (%d KB > 50 KB)，严禁直接入库", size/1024),
+						Suggestion: "请将图片移至 docs/ 或 assets/ 文档目录，或使用外部 CDN",
+					})
+				}
 			}
 			continue
 		}
@@ -851,7 +976,7 @@ func auditStagedLines(slashPath string, lines []string, res *AuditResult) {
 
 		// 机器绝对路径
 		if !isComment && !strings.Contains(line, "<YourUser>") && !strings.Contains(line, "示例") {
-			if matches := stagedPathRegex.FindString(line); matches != "" {
+			if matches := findHardcodedMachinePath(line); matches != "" {
 				res.Violations = append(res.Violations, Violation{
 					Level:       "ERROR",
 					Category:    "机器绝对路径泄露",

@@ -344,4 +344,20 @@ func TestPrePushHookAuthorization(t *testing.T) {
 	if strings.Contains(out, "触发 Agate pre-push 物理硬门禁拦截") {
 		t.Errorf("ALLOW_AUTOMATED_PUSH=true 时预期通过硬门禁，但被拦截: %s", out)
 	}
+
+	// Case 6: 存在 Agent 环境变量 (如 CURSOR_AGENT=1) 且未授权 -> 强行拦截 (RSK-001)
+	cmdAgent := exec.Command("bash", prePushScript)
+	cmdAgent.Dir = tempDir
+	var agentEnv []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "ALLOW_AUTOMATED_PUSH=") {
+			agentEnv = append(agentEnv, e)
+		}
+	}
+	agentEnv = append(agentEnv, "CURSOR_AGENT=1")
+	cmdAgent.Env = agentEnv
+	outAgent, errAgent := cmdAgent.CombinedOutput()
+	if errAgent == nil || !strings.Contains(string(outAgent), "触发 Agate pre-push 物理硬门禁拦截") {
+		t.Errorf("存在 CURSOR_AGENT 且未授权时预期被强行拦截，但通过: %s", string(outAgent))
+	}
 }

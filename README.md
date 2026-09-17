@@ -31,10 +31,10 @@
 | 命令 / 模块 | 核心功能 | 解决痛点 | 运作机制 |
 | :--- | :--- | :--- | :--- |
 | **`agate init`** | 一键工程护栏挂载 | 消除配置分裂，规范项目基线 | 自动分发核心规约至各 Agent，初始化双地图骨架（`AGENTS.md` + `contexts/context.md`），挂载防爆仓索引与本地 Git 双重门禁。 |
-| **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 13+ 项 AI 缓存、草稿与私有配置，不修改公共 `.gitignore`，团队零感知。 |
-| **`agate verify`** | 闭环自检物证交付 | 杜绝伪交付与无效死循环试错 | **阶段 0** 静态扫描（拦截密钥、大文件、未完工占位符等 7 大红线）+ **阶段 1** 优先调度项目自检脚本或智能单测套件，输出绿色 `[PASS]` 物证；两振未过强制熔断。 |
-| **`agate scan`** | 智能拓扑嗅探推导 | 自动化补齐项目架构全景 | 智能分析工程构建文件（Maven / npm / Go / Python 等）与核心端口拓扑，支持 `--write` 一键自动回填双地图。 |
-| **`agate hook`** | Git 双重物理门禁 | 拦截未验证代码与越权外溢 | 挂载本地 `pre-commit`（强制自检验证）与 `pre-push`（防偷跑硬阻断），彻底守住版本控制底线。 |
+| **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 16 项 AI 缓存、草稿与私有配置（包含 `.env*`），不修改公共 `.gitignore`，团队零感知。 |
+| **`agate verify`** | 闭环自检物证交付 | 杜绝伪交付与无效死循环试错 | **阶段 0** 静态扫描（拦截密钥、大文件、未完工占位符等 7 大红线，支持 `--staged` 暂存区定向审查）+ **阶段 1** 优先调度自检脚本或测试套件，输出绿色 `[PASS]` 物证。 |
+| **`agate scan`** | 智能拓扑嗅探推导 | 自动化补齐项目架构全景 | 智能分析工程构建文件（Maven / npm / Go / Python 等）与核心端口拓扑，支持 `--write` 确定性排序稳定回填双地图。 |
+| **`agate hook`** | Git 双重物理门禁 | 拦截未验证代码与越权外溢 | 挂载本地 `pre-commit`（暂存区定向自检）与 `pre-push`（白名单授权物理防偷跑），支持 `status` 门禁状态看板。 |
 
 ---
 
@@ -85,7 +85,7 @@ agate init
 
 # 或按需为特定 Agent 定向挂载（支持组合）：
 agate init -t cursor          # 仅生成 .cursorrules
-agate init -t gemini          # 仅针对 Antigravity (.gemini/GEMINI.md)
+agate init -t antigravity     # 针对 Antigravity (.gemini/GEMINI.md)
 agate init -t claude          # 仅针对 Claude Code (CLAUDE.md)
 agate init -t windsurf        # 仅针对 Windsurf (.windsurfrules)
 agate init -t all             # 全量挂载所有支持的 Agent 工具
@@ -95,13 +95,13 @@ agate init -t all             # 全量挂载所有支持的 Agent 工具
 ```text
 [agate] 正在为工程 [my-project] 挂载防护体系...
   [+] 已生成 .ignore (索引防爆仓)
-  [+] 已向 .git/info/exclude 注入 13 项隔离清单 (私有配置完全隐形)
+  [+] 已向 .git/info/exclude 注入 16 项隔离清单 (私有配置完全隐形)
   [+] 已挂载 cursor 规约 -> .cursorrules
   [+] 已生成 AGENTS.md 骨架
   [+] 已生成 contexts/context.md (技术契约骨架)
-  [+] 已挂载私有 pre-commit 门禁 -> agate verify
-  [+] 已挂载私有 pre-push 门禁
-=== [完成] 工程护栏挂载完毕 ===
+  [+] 已挂载私有 pre-commit 门禁 -> agate verify --staged
+  [+] 已挂载私有 pre-push 门禁 (物理防偷跑)
+=== [完成] 工程护栏全量挂载完毕 ===
 ```
 
 ### 2. 冷启动快速注入架构认知
@@ -114,8 +114,13 @@ agate init -t all             # 全量挂载所有支持的 Agent 工具
 在 AI 修改代码完毕或提交前，执行自检：
 
 ```bash
-# 触发两阶段自检（静态安全审计 + 业务单测/验证脚本调度）
+# 基础模式：触发两阶段自检（静态安全审计 + 业务单测/自检脚本调度）
 agate verify
+
+# 进阶模式：
+agate verify --staged       # 仅定向审查 Git 暂存区待提交文件（pre-commit 自动调用，毫秒级快速就绪）
+agate verify --strict       # 严格模式：未检测到自检脚本或测试套件时强制阻断交付
+agate verify --skip-guard   # 应急逃生模式：跳过 Phase 0 安全扫描，仅运行测试脚本
 ```
 自检通过将输出 `[PASS]` 结果；如连续两次失败，AI 必须停手熔断交还主控权。
 
@@ -127,9 +132,62 @@ agate verify
 # 扫描当前工程技术栈与开放端口
 agate scan
 
-# 自动将扫描结果回填同步至 AGENTS.md 与 contexts/context.md
+# 自动将扫描结果确定性排序同步回填至 AGENTS.md 与 contexts/context.md（零 git diff 噪点）
 agate scan --write
 ```
+
+### 5. Git 门禁生命周期与状态看板
+
+```bash
+# 查看当前仓库 Git 门禁挂载状态看板
+agate hook status
+
+# 手动重新挂载或卸载门禁（卸载时精准清理自身，绝不删除用户自定义钩子）
+agate hook install
+agate hook uninstall
+```
+
+### 6. 自包含单文件 HTML 审查与复盘报告
+
+针对人类审查、代码评审（Code Review）与合规归档场景，Agate 支持将任务看板、代码变更 Diff、安全审计与测试物证一键编译为零网络依赖的单文件 HTML（Self-contained HTML Transcript）：
+
+```bash
+# 一键编译并导出 HTML 审查报告（默认写入 .ai-memory/reviews/，受隐形隔离保护）
+agate export
+
+# 进阶参数：
+agate export --open          # 导出成功后自动在系统默认浏览器中秒级弹出
+agate export --staged        # 仅针对 Git 暂存区改动生成审查报告
+agate export -o review.html  # 指定自定义导出路径
+
+# 快捷预览最近一次生成的审查报告（若无则现场生成并打开）
+agate view
+
+# 在闭环自检时联动生成审查报告
+agate verify --report
+```
+
+### 7. 跨 Agent 任务接力与记忆治理 (Agate Relay)
+
+针对多 Agent 协作或在不同开发工具（如 Cursor、Antigravity、Claude Code、Windsurf）之间频繁切换的场景，Agate 提供跨工具的任务接力中枢与认知防线：
+
+```bash
+# 查看当前任务看板、执行状态、持锁人与交付物证
+agate task status
+
+# 认领当前任务并加锁（防多 Agent 同时修改代码冲突，支持 --agent 指定）
+agate task claim
+
+# 阶段完工并交接：自动自检门禁、编译自包含 HTML 物证单并流转至就绪状态
+agate task handover --to cursor --note "阶段1鉴权核心已完成，单测绿灯"
+
+# 切换至新工具后唤醒接棒：一键继承前任留下的断点与接力四要素
+agate task resume
+```
+
+#### 长期记忆防线（Memory Governance）
+- **L0 任务临时避坑**：单次排查中遇到的偶发报错、临时网络状态锁死在 `TASK.md` 的“暗坑警示”中，随任务生命周期自然消亡，**绝不全局泛化**；
+- **L1 长期工程记忆**：`MEMORY.md` 默认对 Agent **严格只读**，严禁擅自修改；重大底层暗坑遵循“Agent 提议、人类拍板”的准入制，唯有用户显式下发指令（如“写入记忆”）方可单次追加。
 
 ---
 
@@ -159,7 +217,10 @@ graph TD
 
 ### 3. Git 隐形隔离与外溢物理死锁（私有状态隔离，严守底线）
 - **隐形隔离**：AI 私有配置全量注册于本地 `.git/info/exclude`，与团队 `.gitignore` 解耦，互不干扰；
-- **显式授权公理 (Explicit Mandate Principle)**：Git 提交推送、Release 发布、环境推流等具外溢效应的动作默认物理死锁，除非用户指令中出现明确指向动词（如“提交代码”、“发布 Release”），严禁 AI 擅作主张私自外溢。
+- **显式授权公理 (Explicit Mandate Principle)**：Git 提交推送、Release 发布、环境推流等具外溢效应的动作默认物理死锁，除非用户指令中出现明确指向动词（如“提交代码”、“发布 Release”），严禁 AI 擅作主张私自外溢；
+- **双物理卡口守底线**：
+  - `pre-commit` 门禁自动对暂存区待提交文件调用 `agate verify --staged`，实现毫秒级快速就绪与红线拦截；
+  - `pre-push` 门禁严格识别终端环境；在非交互式/自动化脚本环境下，唯有用户显式授权且声明 `ALLOW_AUTOMATED_PUSH=1`（或 `true`）时才放行，否则强制阻断偷跑。
 
 ---
 

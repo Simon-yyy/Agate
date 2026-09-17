@@ -20,12 +20,16 @@ var DefaultTaskTpl []byte
 //go:embed memory.tpl
 var DefaultMemoryTpl []byte
 
+//go:embed review.html.tpl
+var DefaultReviewHtmlTpl []byte
+
 // 便捷别名引用
 var (
-	SkillMD    = DefaultSkill
-	IgnoreTpl  = DefaultIgnore
-	AgentsTpl  = DefaultAgentsTpl
-	ContextTpl = DefaultContextTpl
-	TaskTpl    = DefaultTaskTpl
-	MemoryTpl  = DefaultMemoryTpl
+	SkillMD       = DefaultSkill
+	IgnoreTpl     = DefaultIgnore
+	AgentsTpl     = DefaultAgentsTpl
+	ContextTpl    = DefaultContextTpl
+	TaskTpl       = DefaultTaskTpl
+	MemoryTpl     = DefaultMemoryTpl
+	ReviewHtmlTpl = DefaultReviewHtmlTpl
 )

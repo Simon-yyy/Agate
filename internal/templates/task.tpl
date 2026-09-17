@@ -1,14 +1,31 @@
+---
+task_id: TASK-INIT
+title: 初始协同任务
+status: TODO
+current_agent: none
+next_agent: any
+last_verified_at: none
+receipt_html: none
+updated_at: none
+---
+
 # 协同任务看板 (TASK.md)
 
-## 当前任务目标
+## 一、 任务目标与背景
 - **任务描述**: 
-- **状态**: [ ] 方案待确认 / [ ] 执行中 / [ ] 验证通过 / [ ] 已交付
+- **当前状态**: [TODO] 待认领
 
-## 阶段方案清单 (Two-Phase Gate)
-- **拟改动文件**:
-  - `path/to/file`
-- **核心变更点**:
+## 二、 接力四要素 (Handover Quartet)
+1. **已完成事项 (Done)**:
+   - [ ] 
+2. **在途断点 (In-Progress / Blocked)**:
+   - 当前施工点: 
+3. **接棒建议与下一步 (Next Action)**:
+   - 下一步操作: 
+4. **暗坑警示 (Traps & Memory)**:
+   - 临时在途避坑 (临时问题锁死于此，随任务消亡；长期通用经验须由用户显式指令沉淀至 MEMORY.md)
 
-## 验证与验收物证
-- **验证命令**: `agate verify`
-- **执行物证**: (待填入 PASS 输出)
+## 三、 阶段里程碑
+- [ ] 阶段 1: 方案设计与门禁确认
+- [ ] 阶段 2: 核心功能实现
+- [ ] 阶段 3: 自检验证与物证归档

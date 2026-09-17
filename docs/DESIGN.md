@@ -49,14 +49,17 @@
 
 ### 2.2 CLI 核心引擎
 采用 Go 编写的单二进制可执行文件：
-- **`pkg/adapter`**：统一规约分发器，将内嵌或全局规约映射到 `.gemini/GEMINI.md`、`.cursorrules`、`CLAUDE.md` 等目标文件；
-- **`pkg/git`**：Git 仓库探查器，管理 `.git/info/exclude` 与本地 Hook 重定向；
-- **`pkg/harness`**：地图骨架生成器、跨平台文件操作与软链回退机制；
-- **`internal/templates`**：通过 `go:embed` 将标准规约和配置固化进可执行二进制中，支持脱网离线运行。
+- **`pkg/adapter`**：统一规约分发器，将内嵌或全局规约映射到 `.gemini/GEMINI.md`、`.cursorrules`、`CLAUDE.md` 等目标文件，支持非破坏性备份与原子写入；
+- **`pkg/git`**：Git 仓库探查器，管理 `.git/info/exclude` 受管块、Git Worktree 寻径与本地 Hook 生命周期；
+- **`pkg/guard`**：Phase 0 静态合规与安全审计引擎，执行敏感凭据、超大文件、断点残留、绝对路径等 7 大红线拦截，支持暂存区定向审查与大仓库内存忽略查询；
+- **`pkg/relay`**：跨 Agent 任务接力与状态机中枢，管理双模 TASK.md、租约互斥锁与接力四要素；
+- **`pkg/reporter`**：自包含单文件 HTML 审查报告引擎，汇聚安全审计、Diff 对比、任务看板与物证日志，支持跨平台浏览器自动弹出；
+- **`pkg/harness`**：地图骨架生成器、跨平台文件操作、软链回退与真原子写入机制；
+- **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行。
 
 ### 2.3 底层 Git 与执行层
-- **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，避免修改团队共用的 `.gitignore`；
-- **双重物理 Hook 路径**：通过 `git config --local core.hooksPath .git/custom-hooks` 同时挂载私有 `pre-commit`（代码纯净度与单测自检）与 `pre-push`（物理阻断 AI/脚本自动化偷跑推流，锁定提交权 100% 归人类），不破坏用户全局或其他三方 Hook。
+- **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，采用受管标记块（Managed Block）增量注入，避免修改团队共用的 `.gitignore`；
+- **双重物理 Hook 路径**：通过 `git config --local core.hooksPath .git/custom-hooks` 同时挂载私有 `pre-commit`（暂存区定向自检）与 `pre-push`（物理阻断 AI/脚本自动化偷跑推流，锁定提交权 100% 归人类），不破坏用户全局或其他三方 Hook。
 
 ---
 
@@ -67,29 +70,43 @@
 agate/
 ├── cmd/
 │   ├── root.go             # 根命令定义、版本信息与全局 Flag
-│   ├── init.go             # agate init 命令逻辑
-│   ├── verify.go           # agate verify 命令逻辑
+│   ├── init.go             # agate init 护栏编排逻辑
+│   ├── verify.go           # agate verify 自检引擎 (--staged, --strict, --skip-guard, --report)
+│   ├── export.go           # agate export 自包含 HTML 审查报告导出
+│   ├── view.go             # agate view 快速浏览器预览审查报告
+│   ├── task.go             # agate task 跨 Agent 任务接力 (status/claim/handover/resume)
 │   ├── isolate.go          # agate isolate 隐形隔离逻辑
-│   ├── scan.go             # agate scan 拓扑扫描逻辑
-│   └── hook.go             # agate hook install / uninstall
+│   ├── scan.go             # agate scan 拓扑扫描与确定性回填
+│   └── hook.go             # agate hook install / uninstall / status
 ├── pkg/
 │   ├── adapter/
-│   │   ├── adapter.go      # 多 Agent 目标定义与分发接口
-│   │   ├── cursor.go       # Cursor 适配器
-│   │   ├── gemini.go       # Antigravity/Gemini 适配器
-│   │   └── claude.go       # Claude Code 适配器
+│   │   └── adapter.go      # 多 Agent 目标定义、规约分发与非破坏性备份
 │   ├── git/
-│   │   ├── exclude.go      # .git/info/exclude 读写与去重合并
-│   │   └── hook.go         # Git Hooks 安装、激活与卸载
+│   │   ├── exclude.go      # .git/info/exclude 受管块管理、去重与根目录寻径
+│   │   ├── hook.go         # Git Hooks 安装、激活、卸载、状态查询与防偷跑
+│   │   └── diff.go         # 原生 Git Diff 提取、分支元数据读取
+│   ├── guard/
+│   │   └── preflight.go    # Phase 0 静态安全红线、敏感信息脱敏与暂存区定向审计
+│   ├── relay/
+│   │   ├── manifest.go     # TASK.md Frontmatter 双模解析与格式化
+│   │   ├── lock.go         # .ai-memory/locks/task.lock 租约互斥锁
+│   │   └── relay.go        # 认领、自检交接与唤醒接棒业务编排
+│   ├── reporter/
+│   │   ├── report.go       # 数据汇聚、HTML 模板编译落盘与历史查找
+│   │   └── browser.go      # 跨平台系统浏览器拉起实现 (xdg-open / open / start)
 │   └── harness/
-│       ├── fs.go           # 跨平台软链、拷贝降级与原子写
-│       └── scaffold.go     # AGENTS.md / contexts 骨架初始化
+│       ├── fs.go           # 跨平台软链、拷贝降级与崩溃安全原子写 (WriteFileAtomic)
+│       └── scaffold.go     # AGENTS.md / contexts / TASK / MEMORY 骨架初始化
 ├── internal/
 │   └── templates/
 │       ├── embed.go        # go:embed 静态资源声明
-│       ├── SKILL.md        # 核心 AI 协同规约
-│       ├── ignore.tpl      # .ignore 模板
-│       └── agents.tpl      # AGENTS.md 初始骨架模板
+│       ├── review.html.tpl # 自包含 HTML 审查报告模板 (零 CDN 外链依赖)
+│       ├── task.tpl        # YAML Frontmatter + 接力四要素任务看板模板
+│       ├── SKILL.md        # 核心 AI 协同规约 (SSOT)
+│       ├── ignore.tpl      # .ignore 索引防爆仓模板
+│       ├── agents.tpl      # AGENTS.md 初始骨架模板
+│       ├── context.tpl     # contexts/context.md 技术契约模板
+│       └── memory.tpl      # MEMORY.md 长期记忆模板
 ├── vendor/                 # 离线打包依赖
 ├── go.mod
 ├── go.sum
@@ -140,6 +157,24 @@ graph TD
     ResultCheck -->|是| ExitPass[输出 PASS 退出码 0]
     ResultCheck -->|否| ExitFail
 ```
+
+### 3.4 关键工程优化与安全设计
+
+#### 1. 崩溃安全原子写入 (`pkg/harness/fs.go:WriteFileAtomic`)
+规约分发或模板更新时，直接调用 `os.WriteFile` 在遇到断电或强杀时容易造成半截文件损坏。Agate 采用标准的崩溃安全原子模式：
+- 在目标文件同卷目录下创建临时文件；
+- 将内容完全写入后调用 `file.Sync()` 强制将数据刷入物理磁盘介质；
+- 调用操作系统原生原子重命名（`os.Rename`）瞬间替换目标文件，确保任何意外场景下原文件完整无损。
+
+#### 2. 大仓库批量内存忽略优化 (`pkg/guard/preflight.go:newGitContext`)
+在包含数万未跟踪文件的大型仓库中，对每个文件调用一次 `git check-ignore` 子进程会产生秒级甚至十秒级的进程创建开销。
+Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false ls-files --others -i --exclude-standard` 批量读取被忽略路径集合并缓存在内存中；遍历时通过纯内存层级路径前缀判定，将 Git 忽略检测系统调用降为 0，扫描在 10ms 内极速完成。
+
+#### 3. 暂存区精准审查 (`agate verify --staged`)
+解决工作区脏代码与实际准备提交内容脱节的痛点：
+- 调用 `git diff --cached --name-only --diff-filter=ACMR` 定向获取暂存文件列表；
+- 优先通过 `git show :<path>` 直接读取 Git Index 中的暂存内容，而非工作区物理文件；
+- 仅当暂存区内容触发安全红线时阻断，未暂存的本地探索性脏代码互不干扰。
 
 ---
 
