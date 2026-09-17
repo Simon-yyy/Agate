@@ -48,24 +48,34 @@
 
 | 平台与架构 | 安装包文件名示例 | 推荐安装路径 |
 | :--- | :--- | :--- |
-| **Linux (x86_64)** | `agate-v*-linux-amd64.tar.gz` | `/usr/local/bin/agate` |
-| **macOS (Intel)** | `agate-v*-darwin-amd64.tar.gz` | `/usr/local/bin/agate` |
-| **macOS (Apple Silicon)** | `agate-v*-darwin-arm64.tar.gz` | `/usr/local/bin/agate` |
-| **Windows (x64)** | `agate-v*-windows-amd64.zip` | `%USERPROFILE%\bin\agate.exe` 或任意系统 PATH 目录 |
+| **Linux (x86_64)** | `agate_<version>_linux_amd64.tar.gz` | `/usr/local/bin/agate` |
+| **macOS (Intel)** | `agate_<version>_darwin_amd64.tar.gz` | `/usr/local/bin/agate` |
+| **macOS (Apple Silicon)** | `agate_<version>_darwin_arm64.tar.gz` | `/usr/local/bin/agate` |
+| **Windows (x64)** | `agate_<version>_windows_amd64.zip` | `%USERPROFILE%\bin\agate.exe` 或任意系统 PATH 目录 |
 
 **Linux / macOS 快速部署示例：**
 ```bash
-# 解压并移至系统命令目录
-sudo tar -zxvf agate-v*-linux-amd64.tar.gz -C /usr/local/bin/
+# 解压并移至系统命令目录 (以 linux_amd64 为例)
+sudo tar -zxvf agate_*_linux_amd64.tar.gz -C /usr/local/bin/
 sudo chmod +x /usr/local/bin/agate
 
 # 验证安装
 agate --version
 ```
 
-### 方式 2：源码本地构建（离线零依赖）
+### 方式 2：通过 Go 命令一键安装
 
-若本地已配置 Go 1.21+ 环境，可直接从源码秒级静态编译：
+若本地已安装 Go 1.21+ 环境，可直接通过 `go install` 安装最新版本：
+
+```bash
+go install github.com/Simon-yyy/Agate@latest
+```
+
+> **提示**：请确保 Go 的二进制安装目录（`$GOPATH/bin` 或 `$HOME/go/bin`）已加入系统的环境变量 `PATH` 中。
+
+### 方式 3：源码本地构建（离线零依赖）
+
+若需在离线或受限环境进行构建，可直接拉取源码静态编译：
 
 ```bash
 git clone https://github.com/Simon-yyy/Agate.git
@@ -253,20 +263,33 @@ graph TD
 
 ## 🛠️ 项目维护与版本自动化发布
 
-本项目内置面向开发者的全平台一键语义化版本管理工具：
+本项目内置面向开发者的全平台一键语义化版本管理与归档构建工具：
 
+### 1. 本地跨平台多架构归档编译
+本地无需额外配置交叉编译依赖，即可一键生成全平台免安装二进制产物：
 ```bash
-# 1. 升级版本号并归档构建至 bin/v<version>/{windows,linux,darwin}
-./scripts/bump.sh patch             # 补丁号自增 (如 0.1.1 -> 0.1.2)
-./scripts/bump.sh minor             # 次版本自增 (如 0.1.2 -> 0.2.0)
+# Linux / macOS 下执行：
+./scripts/archive.sh
+
+# Windows (PowerShell / CMD) 下执行：
+.\scripts\archive.cmd
+# 或直接调用：powershell -ExecutionPolicy Bypass -File .\scripts\archive.ps1
+```
+> 产物将自动输出至 `bin/v<version>/` 目录（包含 `windows/agate.exe`、`linux/agate`、`darwin/agate_amd64`、`darwin/agate_arm64`）。
+
+### 2. 语义化版本升级与云端自动化发布
+```bash
+# 升级版本号并触发本地归档构建
+./scripts/bump.sh patch             # 补丁号自增 (如 0.2.0 -> 0.2.1)
+./scripts/bump.sh minor             # 次版本自增 (如 0.2.0 -> 0.3.0)
 ./scripts/bump.sh 0.3.0             # 指定具体版本号
 
-# 2. 一键自增并触发 GitHub Actions 云端 Release 自动化构建
-./scripts/bump.sh patch --release   # 自增版本、打 tag 并推送至 GitHub
+# 一键自增并推送标签，触发 GitHub Actions 云端 Release 自动化流水线
+./scripts/bump.sh patch --release
 ```
 
-- Windows 环境下可对应运行 `.\scripts\bump.ps1 -Bump patch -Release`；
-- 推送标签后，GitHub Actions 流水线将并发交叉编译各平台可执行文件并自动创建 GitHub Release 供用户下载。
+- **Windows 环境**：对应可运行 `.\scripts\bump.ps1 -Bump patch [-Release]`；
+- 推送标签后，GitHub Actions 流水线将并发交叉编译各平台免安装包并自动创建 [GitHub Release](https://github.com/Simon-yyy/Agate/releases) 供用户下载。
 
 ---
 

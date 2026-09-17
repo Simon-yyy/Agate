@@ -14,7 +14,7 @@
 - **版本升级与归档**：`./scripts/bump.sh [patch|minor|major]`（支持加 `--release` 自动推送到 GitHub 发布）
 - **本地开发构建**：`go build -mod=vendor -o agate main.go`
 - **跨平台全量归档**：`./scripts/archive.sh`（生成 Windows/Linux/macOS 产物至 `bin/v<version>/`）
-- **Windows 本地归档**：`.\scripts\archive.cmd` (调度 `scripts/archive.ps1`)
+- **Windows 本地归档**：`.\scripts\archive.cmd` (调度 `scripts/archive.ps1`，生成全平台产物至 `bin/v<version>/` 的 windows/linux/darwin 目录)
 
 ### 2. 闭环自检与校验
 - **执行本地自检**：`./verify.sh`（Linux/macOS）或 `verify.cmd`（Windows）
@@ -95,6 +95,9 @@
 - [internal/templates/context.tpl](internal/templates/context.tpl)：技术契约基线模板。
 - [internal/templates/ignore.tpl](internal/templates/ignore.tpl)：防检索爆仓 .ignore 模板。
 - [internal/templates/embed.go](internal/templates/embed.go)：Go 标准库 `//go:embed` 静态编译资源入口。
+
+### 9. 智能体指纹与注册中心 (`pkg/agent/`)
+- [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf）、自动化环境指纹嗅探器与类型注册表。
 
 ---
 

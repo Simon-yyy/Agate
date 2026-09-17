@@ -2,6 +2,7 @@
 
 ## 1. 核心业务与领域模型
 - **单一事实源 (SSOT)**: 核心规约由 `internal/templates/SKILL.md` 固化，通过 `pkg/adapter` 分发映射至各大 Agent 工具配置文件；Codex 使用 `AGENTS.md` 内的受管区块。
+- **智能体指纹识别 (Agent Fingerprinting)**: 通过 `pkg/agent` 集中感知当前环境中的 Agent 类型（Codex, Cursor, Antigravity, Claude, Windsurf）及 CI 自动化标志，保障策略注入与状态机流转的精准对接。
 - **隐形隔离 (Invisible Isolation)**: AI 私有状态（`.agents/`, `.gemini/`, `.cursorrules`, `TASK.md`, `MEMORY.md` 等）仅注册在本地 `.git/info/exclude`，严禁污染团队公共 `.gitignore` 与 Git 提交树。
 - **闭环自检与两振熔断**: 代码变更后强制执行 `agate verify`（或 `agent-verify`），两振未果强制退出交还主控权。
 
@@ -17,9 +18,10 @@
   - `agate task [status|claim|handover|resume|done]`: 跨 Agent 任务接力中枢，管理 TASK.md 状态机流转、租约互斥锁、交接四要素与流转审计时间线。
 - **自举验证契约**:
   - 项目根目录具备 `verify.cmd` / `verify.sh`，优先保障本地验证开箱即走。
-- **跨平台兼容**:
+- **跨平台兼容与归档收敛**:
   - Windows 环境优先尝试软链接，权限受限时优雅降级为物理拷贝（`CopyFile`）；
-  - 换行符与 Frontmatter 解析原生兼容 CRLF/LF，防御边界截断漂移。
+  - 换行符与 Frontmatter 解析原生兼容 CRLF/LF，防御边界截断漂移；
+  - 归档工具（`scripts/archive.ps1` / `scripts/archive.sh`）原生支持全平台零 CGO 交叉编译（Windows amd64, Linux amd64, macOS amd64/arm64），产物纯净收敛于 `bin/v<version>/` 对应目录。
 
 ## 3. 动作外溢与显式授权公理 (Explicit Mandate Principle)
 - **动作二分基线**：
@@ -33,7 +35,3 @@
 - **接力四要素与状态机**：`TASK.md` 采用标准 YAML Frontmatter + Markdown 结构；换工具前必须执行 `agate task handover` 固化物证，新工具启动首句执行 `agate task resume` 接棒，全量任务交付归档执行 `agate task done`。
 - **并发租约锁**：`.ai-memory/locks/task.lock` 提供软互斥保护，防止多 IDE 同时施工冲突。
 - **长期记忆神圣公理**：`MEMORY.md` 默认只读，严禁 Agent 私自直写；在途偶发问题仅记录于当期 `TASK.md` 随任务自然消亡；重大架构暗坑须遵循“提议制”，由人类显式确认后方可沉淀。
-
-
-
-
