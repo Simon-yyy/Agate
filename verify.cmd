@@ -41,11 +41,18 @@ if not "%GO_BIN%"=="" (
 
 if "%HAS_GO%"=="1" (
     echo 正在运行单元测试套件...
-    "%GO_CMD%" test -mod=vendor -v ./pkg/...
-    if %errorlevel% neq 0 (
+    "%GO_CMD%" test -mod=vendor -v ./...
+    if errorlevel 1 (
         echo [FAIL] 单元测试执行失败
         exit /b 1
     )
+    echo 正在验证主程序构建编译...
+    "%GO_CMD%" build -mod=vendor -o "%TEMP%\agate_verify_test.exe" main.go
+    if errorlevel 1 (
+        echo [FAIL] 主程序编译失败
+        exit /b 1
+    )
+    if exist "%TEMP%\agate_verify_test.exe" del /f /q "%TEMP%\agate_verify_test.exe"
 ) else (
     echo 提示: 未检测到 Go 编译器，跳过单测调度，静态结构完整
 )

@@ -101,6 +101,9 @@ func TestIsolateCmdIntegration(t *testing.T) {
 func TestVerifyCmdSkipGuardFlag(t *testing.T) {
 	tempDir, cleanup := initTestGitRepo(t)
 	defer cleanup()
+	defer func() {
+		flagSkipGuard = false
+	}()
 
 	// 注入违规的写死绝对路径代码
 	dirtyScript := filepath.Join(tempDir, "run.cmd")
@@ -111,6 +114,24 @@ func TestVerifyCmdSkipGuardFlag(t *testing.T) {
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Errorf("--skip-guard 应急模式预期成功跳过前置护栏，但返回了错误: %v", err)
+	}
+}
+
+func TestVerifyCmdStrictModeFailsWhenNoTests(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+	defer func() {
+		flagStrict = false
+	}()
+
+	// 写入合规源码，但无 verify 脚本也无测试套件
+	_ = os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644)
+
+	// 在严格模式下，预期拒绝假绿灯，返回拦截错误
+	rootCmd.SetArgs([]string{"verify", "--strict"})
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Errorf("在未配置任何测试套件的工程中启用 --strict 预期报错拦截，但返回了 nil")
 	}
 }
 

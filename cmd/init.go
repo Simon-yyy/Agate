@@ -74,7 +74,20 @@ var initCmd = &cobra.Command{
 			fmt.Println("  \033[92m[+] 已生成 contexts/context.md 基线\033[0m")
 		}
 
-		// 6. 安装本地 Git 物理双重门禁
+		// 6. 生成私有协同看板与记忆 (已由 exclude 隐形隔离，不污染 Git)
+		if created, err := harness.EnsureTaskBoard(); err != nil {
+			return err
+		} else if created {
+			fmt.Println("  \033[92m[+] 已生成 TASK.md (任务看板与方案物证)\033[0m")
+		}
+
+		if created, err := harness.EnsureMemory(); err != nil {
+			return err
+		} else if created {
+			fmt.Println("  \033[92m[+] 已生成 MEMORY.md (跨会话协同记忆)\033[0m")
+		}
+
+		// 7. 安装本地 Git 物理双重门禁
 		if git.IsGitRepo() && !flagNoHook {
 			if err := git.InstallHooks(); err != nil {
 				fmt.Printf("  \033[93m[!] 挂载 Git 物理门禁提示: %v\033[0m\n", err)

@@ -85,3 +85,44 @@ func TestResolveTargets(t *testing.T) {
 		t.Errorf("嗅探已有 .cursorrules 失败，得到: %v", resDetected)
 	}
 }
+
+func TestDistributeRulesBackupProtection(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-backup-test-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	// 预先写入用户手工维护的规则
+	originalUserRules := []byte("# User Custom Rules - DO NOT OVERWRITE")
+	targetFile := ".cursorrules"
+	if err := os.WriteFile(targetFile, originalUserRules, 0644); err != nil {
+		t.Fatalf("预写用户规约失败: %v", err)
+	}
+
+	// 执行分发新的规约
+	newRules := []byte("# Agate Managed Skill Rules")
+	if err := DistributeRules(newRules, []AgentTarget{TargetCursor}); err != nil {
+		t.Fatalf("DistributeRules 执行失败: %v", err)
+	}
+
+	// 1. 验证目标文件已更新为新规则
+	newData, err := os.ReadFile(targetFile)
+	if err != nil || string(newData) != string(newRules) {
+		t.Errorf("目标文件未正确更新为新规则")
+	}
+
+	// 2. 验证备份文件 .cursorrules.agate.bak 存在且完整保留了用户原始规则
+	backupPath := targetFile + ".agate.bak"
+	backupData, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("预期存在备份文件 %s，但读取失败: %v", backupPath, err)
+	}
+	if string(backupData) != string(originalUserRules) {
+		t.Errorf("备份文件内容不匹配，预期: %s, 实际: %s", string(originalUserRules), string(backupData))
+	}
+}

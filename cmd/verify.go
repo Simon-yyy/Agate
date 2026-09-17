@@ -13,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagSkipGuard bool
+var (
+	flagSkipGuard bool
+	flagStrict    bool
+)
 
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
@@ -71,11 +74,15 @@ var verifyCmd = &cobra.Command{
 			return nil
 		}
 
-		// 3. 通用完备性轻量扫描兜底
-		fmt.Println("未检测到测试套件，执行代码完备性校验...")
-		time.Sleep(50 * time.Millisecond) // 轻微防抖
+		// 3. 通用完备性检查（未配置自检脚本且无可用框架测试套件）
 		elapsed := time.Since(startTime).Round(time.Millisecond)
-		fmt.Printf("\033[92m[PASS] 基础完备性校验通过，允许交付 (耗时: %v)\033[0m\n", elapsed)
+		if flagStrict {
+			fmt.Printf("\033[91m[FAIL] 严格模式拦截: 未检测到自检脚本 (verify.sh/cmd) 或测试套件，拒绝交付 (耗时: %v)\033[0m\n", elapsed)
+			return fmt.Errorf("未检测到自动化测试套件或自检脚本，严格模式拒绝伪交付")
+		}
+
+		fmt.Println("\033[93m[WARN] 未检测到自动化测试套件或自检脚本 (verify.sh/cmd)，动态测试已跳过\033[0m")
+		fmt.Printf("\033[92m[PASS] 静态交付物合规 (注: 仅通过静态安全扫描，未执行动态测试) (耗时: %v)\033[0m\n", elapsed)
 		return nil
 	},
 }
@@ -147,5 +154,6 @@ func isCommandNotFoundError(err error) bool {
 
 func init() {
 	verifyCmd.Flags().BoolVar(&flagSkipGuard, "skip-guard", false, "跳过 Phase 0 安全红线与代码洁癖前置扫描")
+	verifyCmd.Flags().BoolVar(&flagStrict, "strict", false, "严格模式：要求必须存在并执行有效的测试套件或自检脚本，无测试时拒绝交付")
 	rootCmd.AddCommand(verifyCmd)
 }

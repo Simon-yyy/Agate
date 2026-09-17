@@ -61,3 +61,27 @@ func EnsureContext() (bool, error) {
 	}
 	return true, nil
 }
+
+// EnsureTaskBoard 生成协同任务看板 TASK.md
+func EnsureTaskBoard() (bool, error) {
+	if _, err := os.Stat("TASK.md"); err == nil {
+		return false, nil // 已存在
+	}
+
+	if err := WriteFileAtomic("TASK.md", templates.DefaultTaskTpl, 0644); err != nil {
+		return false, fmt.Errorf("写入 TASK.md 失败: %w", err)
+	}
+	return true, nil
+}
+
+// EnsureMemory 生成跨会话协同记忆 MEMORY.md
+func EnsureMemory() (bool, error) {
+	if _, err := os.Stat("MEMORY.md"); err == nil {
+		return false, nil // 已存在
+	}
+
+	if err := WriteFileAtomic("MEMORY.md", templates.DefaultMemoryTpl, 0644); err != nil {
+		return false, fmt.Errorf("写入 MEMORY.md 失败: %w", err)
+	}
+	return true, nil
+}

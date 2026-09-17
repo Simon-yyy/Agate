@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"agate/pkg/harness"
 )
@@ -21,6 +22,11 @@ elif [ -f "./verify.cmd" ]; then
     cmd.exe //c "verify.cmd" || exit 1
 elif [ -f "./verify.sh" ]; then
     bash "./verify.sh" || exit 1
+else
+    echo -e "\n\033[91m[FAIL] pre-commit 门禁拦截: 未找到 agate 或工程自检脚本 (verify.sh/cmd)！\033[0m"
+    echo -e ">> 请确保系统 PATH 包含 agate，或在项目根目录下提供自检脚本。"
+    echo -e ">> 如需临时应急跳过，可使用 git commit --no-verify\n"
+    exit 1
 fi
 
 exit 0
@@ -51,6 +57,10 @@ elif [ -f "./verify.cmd" ]; then
     cmd.exe //c "verify.cmd" || exit 1
 elif [ -f "./verify.sh" ]; then
     bash "./verify.sh" || exit 1
+else
+    echo -e "\n\033[91m[FAIL] pre-push 阻断: 未找到 agate 或工程自检脚本 (verify.sh/cmd)，禁止推流至远端！\033[0m"
+    echo -e ">> 请确保系统 PATH 包含 agate，或在项目根目录下提供自检脚本。"
+    exit 1
 fi
 
 exit 0
@@ -68,19 +78,31 @@ func InstallHooks() error {
 		return fmt.Errorf("创建 Hook 目录失败: %w", err)
 	}
 
-	// 1. 写入 pre-commit
+	// 1. 记录可能已存在的旧 core.hooksPath 配置，避免卸载时丢失原先环境配置
+	origHooksPathFile := filepath.Join(hookDir, ".agate_orig_hooks_path")
+	if _, err := os.Stat(origHooksPathFile); os.IsNotExist(err) {
+		getCmd := exec.Command("git", "config", "--local", "core.hooksPath")
+		if out, err := getCmd.Output(); err == nil {
+			oldPath := strings.TrimSpace(string(out))
+			if oldPath != "" && oldPath != hookDir {
+				_ = harness.WriteFileAtomic(origHooksPathFile, []byte(oldPath), 0644)
+			}
+		}
+	}
+
+	// 2. 写入 pre-commit
 	preCommitPath := filepath.Join(hookDir, "pre-commit")
 	if err := harness.WriteFileAtomic(preCommitPath, []byte(preCommitScript), 0755); err != nil {
 		return fmt.Errorf("写入 pre-commit 脚本失败: %w", err)
 	}
 
-	// 2. 写入 pre-push
+	// 3. 写入 pre-push
 	prePushPath := filepath.Join(hookDir, "pre-push")
 	if err := harness.WriteFileAtomic(prePushPath, []byte(prePushScript), 0755); err != nil {
 		return fmt.Errorf("写入 pre-push 脚本失败: %w", err)
 	}
 
-	// 3. 配置本地 core.hooksPath
+	// 4. 配置本地 core.hooksPath
 	cmd := exec.Command("git", "config", "--local", "core.hooksPath", hookDir)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("配置 git core.hooksPath 失败: %w", err)
@@ -94,18 +116,39 @@ func InstallPreCommitHook() error {
 	return InstallHooks()
 }
 
-// UninstallHooks 卸载私有 Hook 配置与物理脚本
+// UninstallHooks 卸载私有 Hook 配置与物理脚本，绝不破坏用户其它自定义钩子
 func UninstallHooks() error {
 	gitCommonDir, err := GetGitCommonDir()
 	if err != nil {
 		return nil
 	}
 
-	cmd := exec.Command("git", "config", "--local", "--unset", "core.hooksPath")
-	_ = cmd.Run()
-
 	hookDir := filepath.Join(gitCommonDir, "custom-hooks")
-	_ = os.RemoveAll(hookDir)
+	origHooksPathFile := filepath.Join(hookDir, ".agate_orig_hooks_path")
+
+	// 1. 恢复或清理 core.hooksPath
+	if origContent, err := os.ReadFile(origHooksPathFile); err == nil {
+		oldPath := strings.TrimSpace(string(origContent))
+		if oldPath != "" {
+			_ = exec.Command("git", "config", "--local", "core.hooksPath", oldPath).Run()
+		} else {
+			_ = exec.Command("git", "config", "--local", "--unset", "core.hooksPath").Run()
+		}
+		_ = os.Remove(origHooksPathFile)
+	} else {
+		_ = exec.Command("git", "config", "--local", "--unset", "core.hooksPath").Run()
+	}
+
+	// 2. 精准删除 agate 生成的文件，保护用户其它自定义钩子
+	_ = os.Remove(filepath.Join(hookDir, "pre-commit"))
+	_ = os.Remove(filepath.Join(hookDir, "pre-push"))
+	_ = os.Remove(origHooksPathFile)
+
+	// 3. 仅当目录为空时，才安全移除 custom-hooks 目录
+	entries, err := os.ReadDir(hookDir)
+	if err == nil && len(entries) == 0 {
+		_ = os.Remove(hookDir)
+	}
 
 	return nil
 }

@@ -79,3 +79,56 @@ func TestInstallAndUninstallHooks(t *testing.T) {
 		t.Errorf("UninstallHooks 后 core.hooksPath 依然存在")
 	}
 }
+
+func TestUninstallPreservesCustomUserHooks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-hook-preserve-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(tempDir)
+	defer os.Chdir(origWd)
+
+	cmd := exec.Command("git", "init")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init 失败: %v, output: %s", err, string(out))
+	}
+
+	// 1. 安装 agate hooks
+	if err := InstallHooks(); err != nil {
+		t.Fatalf("InstallHooks 失败: %v", err)
+	}
+
+	// 2. 模拟用户在 custom-hooks 中放置了第三方的预置钩子
+	customHookPath := filepath.Join(tempDir, ".git", "custom-hooks", "pre-rebase")
+	userHookContent := []byte("#!/bin/sh\necho 'user custom pre-rebase'\n")
+	if err := os.WriteFile(customHookPath, userHookContent, 0755); err != nil {
+		t.Fatalf("写入第三方钩子失败: %v", err)
+	}
+
+	// 3. 执行卸载 agate 门禁
+	if err := UninstallHooks(); err != nil {
+		t.Fatalf("UninstallHooks 失败: %v", err)
+	}
+
+	// 4. 断言 agate 自身生成的钩子已移除
+	preCommitPath := filepath.Join(tempDir, ".git", "custom-hooks", "pre-commit")
+	if _, err := os.Stat(preCommitPath); !os.IsNotExist(err) {
+		t.Errorf("卸载后 pre-commit 应当已被移除，但依然存在")
+	}
+	prePushPath := filepath.Join(tempDir, ".git", "custom-hooks", "pre-push")
+	if _, err := os.Stat(prePushPath); !os.IsNotExist(err) {
+		t.Errorf("卸载后 pre-push 应当已被移除，但依然存在")
+	}
+
+	// 5. 关键断言：用户的第三方钩子必须完好无损保留！
+	savedContent, err := os.ReadFile(customHookPath)
+	if err != nil {
+		t.Fatalf("用户自定义钩子被误删！错误: %v", err)
+	}
+	if string(savedContent) != string(userHookContent) {
+		t.Errorf("用户自定义钩子内容遭到篡改")
+	}
+}

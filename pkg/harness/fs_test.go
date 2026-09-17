@@ -45,17 +45,30 @@ func TestWriteFileAtomic(t *testing.T) {
 	target := filepath.Join(tempDir, "deep", "nested", "file.txt")
 	testData := []byte("Atomic Write Data")
 
+	// 首次写入
 	if err := WriteFileAtomic(target, testData, 0644); err != nil {
-		t.Fatalf("WriteFileAtomic 执行失败: %v", err)
+		t.Fatalf("WriteFileAtomic 首次执行失败: %v", err)
 	}
 
 	readData, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("读取文件失败: %v", err)
 	}
-
 	if string(readData) != string(testData) {
 		t.Errorf("写入数据不一致")
+	}
+
+	// 覆盖写入测试原子替换
+	updatedData := []byte("Updated Atomic Content")
+	if err := WriteFileAtomic(target, updatedData, 0644); err != nil {
+		t.Fatalf("WriteFileAtomic 覆盖写入失败: %v", err)
+	}
+	readUpdated, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("读取覆盖后的文件失败: %v", err)
+	}
+	if string(readUpdated) != string(updatedData) {
+		t.Errorf("覆盖写入数据不一致，预期: %s, 实际: %s", string(updatedData), string(readUpdated))
 	}
 }
 

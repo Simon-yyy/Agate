@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ const (
 	TargetWindsurf    AgentTarget = "windsurf"
 )
 
-// TargetMapping 目标文件映射关系
+// TargetMapping 映射 Agent 至对应的规约文件物理路径
 var TargetMapping = map[AgentTarget]string{
 	TargetAntigravity: filepath.Join(".gemini", "GEMINI.md"),
 	TargetCursor:      ".cursorrules",
@@ -28,7 +29,7 @@ var TargetMapping = map[AgentTarget]string{
 	TargetWindsurf:    ".windsurfrules",
 }
 
-// DetectExistingTargets 探测当前工程中已有的 Agent 配置文件或目录
+// DetectExistingTargets 自动嗅探工作区已存在的 Agent 配置
 func DetectExistingTargets(root string) []AgentTarget {
 	var detected []AgentTarget
 
@@ -57,11 +58,12 @@ func DetectExistingTargets(root string) []AgentTarget {
 	return detected
 }
 
-// ResolveTargets 解析最终生效的 Agent 目标
-func ResolveTargets(rawTargets []string, root string) []AgentTarget {
+// ResolveTargets 解析最终待挂载的目标 Agent 清单
+func ResolveTargets(explicitTargets []string, root string) []AgentTarget {
 	var targets []AgentTarget
 	hasAll := false
-	for _, t := range rawTargets {
+
+	for _, t := range explicitTargets {
 		lower := strings.ToLower(strings.TrimSpace(t))
 		if lower == "all" {
 			hasAll = true
@@ -106,6 +108,23 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 		destPath, ok := TargetMapping[target]
 		if !ok {
 			continue
+		}
+
+		// 检查目标文件是否已存在既有规则
+		if existing, err := os.ReadFile(destPath); err == nil {
+			// 若内容已经完全相同，无需重复写入或备份
+			if bytes.Equal(existing, content) {
+				fmt.Printf("  \033[90m[-] %-11s 规约已最新，跳过 -> %s\033[0m\n", target, destPath)
+				continue
+			}
+			// 若存在非空既有内容，执行安全备份保护
+			if len(bytes.TrimSpace(existing)) > 0 {
+				backupPath := destPath + ".agate.bak"
+				if err := harness.CopyFile(destPath, backupPath); err != nil {
+					return fmt.Errorf("备份已有规约文件失败 [%s -> %s]: %w", destPath, backupPath, err)
+				}
+				fmt.Printf("  \033[93m[!] 发现既有 %s 规约 [%s]，已自动安全备份至 %s\033[0m\n", target, destPath, backupPath)
+			}
 		}
 
 		if err := harness.WriteFileAtomic(destPath, content, 0644); err != nil {
