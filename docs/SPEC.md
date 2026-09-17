@@ -149,6 +149,14 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 所有修改符合门禁要求，已具备交付条件。
 ```
 
+### 5.3 两振熔断机制协议 (Two-Strike Circuit Breaker)
+1. **物理计数器**：系统在隐形隔离区 `.ai-memory/.verify_streak` 中原子维护连续自检失败的次数（ASCII 格式数字）；
+2. **重置触发**：任意一次自检成功获得退出码 `0` 时，计数器文件被原子清理并归零；
+3. **熔断与红线警示**：当连续失败次数 `>= 2` 时：
+   - CLI 强制向终端标准错误/输出打印醒目红色熔断框；
+   - Agent 必须将当次轮次标记为最终轮次（`IsFinal=true`），严禁继续盲目猜测与死循环修改代码；
+   - 必须主动向用户提交错误堆栈并移交控制权。
+
 ---
 
 ## 六、 自包含单文件 HTML 审查报告规范 (Self-contained Transcript)
@@ -165,9 +173,18 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 ## 七、 跨 Agent 任务接力与记忆治理规范 (Agate Relay)
 
 ### 7.1 双模任务接力单规范 (TASK.md)
-1. **YAML Frontmatter 状态机**：必须包含 `task_id`、`title`、`status` (TODO/CLAIMED/IN_PROGRESS/BLOCKED/HANDOVER_READY/DONE)、`current_agent`、`next_agent`、`receipt_html` 与 `updated_at`；通过 `agate task claim / handover / resume / done` 进行严密状态机驱动；
+1. **YAML Frontmatter 状态机**：必须包含 `task_id`、`title`、`status`、`current_agent`、`next_agent`、`receipt_html` 与 `updated_at`。各状态转换契约如下：
+   | 动作命令 | 前置状态 | 目标状态 | 附带动作与副作用 |
+   | :--- | :--- | :--- | :--- |
+   | `agate task claim` | `TODO` / `HANDOVER_READY` | `CLAIMED` | 抢占创建 `.ai-memory/locks/task.lock`（租约 2 小时） |
+   | `agate task handover` | `CLAIMED` / `IN_PROGRESS` | `HANDOVER_READY` | 触发自检门禁、编译 HTML 物证并向正文追加交接时间线 |
+   | `agate task resume` | `HANDOVER_READY` / `BLOCKED` | `IN_PROGRESS` | 继承前任接力四要素、刷新持锁人信息与当前时间戳 |
+   | `agate task done` | `CLAIMED` / `IN_PROGRESS` / `HANDOVER_READY` | `DONE` | 执行全量自检闭环、解绑并清空互斥锁、打上完成时间戳 |
 2. **接力四要素 (Handover Quartet)**：正文必须结构化包含【已完成事项】、【在途断点】、【接棒建议与下一步】以及【暗坑警示】；
-3. **互斥软租约锁**：多 Agent 施工通过 `.ai-memory/locks/task.lock` 互斥保护，默认 2 小时租约，防范跨 IDE 并发破坏性改动。
+3. **不可篡改流转审计时间线 (Handover Timeline)**：
+   - 表头格式：`| 交接时间 | 交接者 (From) | 接棒者 (To) | 审查物证凭单 | 核心备忘批注 |`；
+   - 截断防护：解析时严格防御 Markdown 表格对正文“暗坑警示”四要素的污染；首行统一进行 CRLF 归一化。
+4. **互斥软租约锁**：多 Agent 施工通过 `.ai-memory/locks/task.lock` 互斥保护，默认 2 小时租约，防范跨 IDE 并发破坏性改动。
 
 ### 7.2 记忆资产分层治理 (Memory Governance)
 1. **L0 任务级临时记忆**：偶发报错、临时网络状态与在途断点仅允许记录于 `TASK.md`，交接或任务归档后自然消亡，严禁全局泛化；

@@ -9,17 +9,17 @@
 - **CLI 命令契约**:
   - `agate init`: 初始化项目 AI 研发护栏与地图资产；
   - `agate isolate`: 注入本地私有排除规则（16 项隐形隔离清单，含 .env*）；
-  - `agate verify [--staged] [--strict] [--skip-guard] [--report]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；支持 `--report` 自动生成 HTML 审查报告；
+  - `agate verify [--staged] [--strict] [--skip-guard] [--report]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断；支持 `--report` 自动生成 HTML 审查报告；
   - `agate export [-o <path>] [--open] [--staged]`: 汇聚安全审计、Diff 对比、任务与自检日志，编译自包含单文件 HTML 审查报告；
   - `agate view`: 在系统默认浏览器中一键预览最新生成的 HTML 审查报告；
   - `agate scan [--write]`: 智能扫描工程技术栈与端口矩阵，支持确定性排序回填 AGENTS.md 与 contexts/context.md；
   - `agate hook [install|uninstall|status]`: 管理本地 Git 双重门禁（pre-commit 提纯自检 + pre-push 物理防偷跑）与状态看板；
-  - `agate task [status|claim|handover|resume]`: 跨 Agent 任务接力中枢，管理 TASK.md 状态流转、租约互斥锁与交接物证。
+  - `agate task [status|claim|handover|resume|done]`: 跨 Agent 任务接力中枢，管理 TASK.md 状态机流转、租约互斥锁、交接四要素与流转审计时间线。
 - **自举验证契约**:
   - 项目根目录具备 `verify.cmd` / `verify.sh`，优先保障本地验证开箱即走。
 - **跨平台兼容**:
   - Windows 环境优先尝试软链接，权限受限时优雅降级为物理拷贝（`CopyFile`）；
-  - 换行符统一使用 LF，防止跨平台 Shell 语法解析错误。
+  - 换行符与 Frontmatter 解析原生兼容 CRLF/LF，防御边界截断漂移。
 
 ## 3. 动作外溢与显式授权公理 (Explicit Mandate Principle)
 - **动作二分基线**：

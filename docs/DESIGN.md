@@ -74,7 +74,7 @@ agate/
 │   ├── verify.go           # agate verify 自检引擎 (--staged, --strict, --skip-guard, --report)
 │   ├── export.go           # agate export 自包含 HTML 审查报告导出
 │   ├── view.go             # agate view 快速浏览器预览审查报告
-│   ├── task.go             # agate task 跨 Agent 任务接力 (status/claim/handover/resume)
+│   ├── task.go             # agate task 跨 Agent 任务接力 (status/claim/handover/resume/done)
 │   ├── isolate.go          # agate isolate 隐形隔离逻辑
 │   ├── scan.go             # agate scan 拓扑扫描与确定性回填
 │   └── hook.go             # agate hook install / uninstall / status
@@ -176,6 +176,45 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
 - 优先通过 `git show :<path>` 直接读取 Git Index 中的暂存内容，而非工作区物理文件；
 - 仅当暂存区内容触发安全红线时阻断，未暂存的本地探索性脏代码互不干扰。
 
+### 3.5 跨 Agent 任务接力与状态机设计 (Agate Relay)
+为了支持开发者在多款 AI 编程助手（Cursor、Antigravity、Claude Code、Windsurf）之间丝滑接力，Agate 引入了轻量级离线任务中枢：
+
+1. **状态机全生命周期驱动**：
+   ```
+   [TODO / 空闲]
+         │  agate task claim
+         ▼
+     [CLAIMED]
+         │  代码编辑中
+         ▼
+   [IN_PROGRESS]
+         │  agate task handover (强制通过自检并产出 HTML 物证)
+         ▼
+   [HANDOVER_READY] ──── agate task resume ────► [IN_PROGRESS] (新 Agent 接棒)
+         │
+         │  agate task done (最终交付，执行全量门禁并解绑互斥锁)
+         ▼
+      [DONE] (终态归档)
+   ```
+2. **多 Agent 租约互斥锁 (`pkg/relay/lock.go`)**：
+   - 采用 `.ai-memory/locks/task.lock` 软互斥保护，记录持有者 Agent、持有者 PID 与到期时间；
+   - 默认 2 小时租约，超时自动释放，杜绝 Agent 异常退出导致的死锁；支持 `--force` 应急强制抢占。
+3. **不可篡改流转审计时间线 (Handover Timeline)**：
+   - 每次交接在 `TASK.md` 正文末尾自动追加结构化表格行，记录交接时间、From/To、HTML 审查物证与批注；
+   - 解析时采用通用非贪婪二级标题截断与 CRLF 归一化，彻底防御 Markdown 表格对“暗坑警示”四要素的污染。
+
+### 3.6 自包含单文件 HTML 审查报告引擎 (Agate Reporter)
+用于解决团队异步代码评审、自检物证核验与合规归档：
+- **纯原生自包含**：HTML 模板内嵌样式与折叠脚本，零外部 CDN 网络依赖，脱网双击即看；
+- **全量汇聚**：聚合展示 Phase 0 7 大安全红线体检、Git 分支与暂存区/工作区 Diff 对比、当前任务状态机与自动化单测控制台日志；
+- **跨平台弹出**：`pkg/reporter/browser.go` 原生支持 Windows (`cmd /c start`)、macOS (`open`) 与 Linux (`xdg-open`) 浏览器秒级自动唤起。
+
+### 3.7 两振熔断机制 (Two-Strike Circuit Breaker) 物理实现
+为了在物理层彻底杜绝 AI Agent 面对报错盲目猜测、反复死循环改动代码：
+- `cmd/verify.go` 在 `.ai-memory/.verify_streak` 中原子维护连续自检失败计数；
+- 只要有任意一次自检成功通过，计数器即刻原子重置为 0；
+- 当检测到连续自检失败次数 `>= 2` 时，CLI 强行向终端输出醒目红色熔断警示框，提示 Agent 必须停手交还主控权。
+
 ---
 
 ## 四、 跨平台与技术选型论证
@@ -202,10 +241,14 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
 - [x] `.git/info/exclude` 自动化去重注入与隔离；
 - [x] `agate verify` 自检门禁与本地 `pre-commit` 拦截。
 
-### Phase 2: 动态架构地图与自适应探查
-- [x] `agate scan`：自动解析项目 `pom.xml`、`package.json`、`go.mod`、路由配置文件，自动丰富 `AGENTS.md` 端口拓扑；
-- [ ] 跨工程全局规约同步机制（支持从 `~/.agate/rules.md` 同步最新规则至当前项目）。
+### Phase 2: 动态架构地图与多 Agent 接力（已完成落地）
+- [x] `agate scan`：自动解析项目 `pom.xml`、`package.json`、`go.mod` 等，自动丰富 `AGENTS.md` 端口拓扑；
+- [x] `agate task`：跨 Agent 协同接力看板、并发租约锁与四要素状态机驱动；
+- [x] `agate export` & `agate view`：自包含 HTML 审查物证报告导出与极速预览；
+- [x] 两振熔断机制（Two-Strike Circuit Breaker）：物理失败计数器与终端红框拦截；
+- [x] 跨平台 CRLF 归一化与防御强化。
 
-### Phase 3: CI/CD 接入与云端协同
-- [ ] GitHub Actions / GitLab CI 门禁插件集成；
+### Phase 3: CI/CD 接入与云端发布（已完成落地）
+- [x] GitHub Actions Goreleaser 跨平台全自动发版流水线；
+- [x] 语义化版本自动化发布脚本（`./scripts/bump.sh`）；
 - [ ] 规则一致性校验（`agate check --strict`），防止本地规约被手动意外篡改。

@@ -29,7 +29,8 @@
 
 ## 6. 跨 Agent 任务接力协议 (Relay Protocol)
 - **唤醒接力契约**：在跨会话或切换 Agent 工具（如从 Antigravity 切换到 Cursor）唤醒时，Agent 必须先执行 `agate task resume` 或检视 `TASK.md`，精确继承前任在“接力四要素”中留下的断点与下一步建议，杜绝盲目重构。
-- **交接归档契约**：切换工具或阶段交付前，必须执行 `agate task handover` 触发自动化门禁自检与自包含 HTML 审查物证生成，确保交接单（`TASK.md`）状态流转为 `HANDOVER_READY` 后方可离场。
+- **交接流转契约**：切换工具或阶段交付前，必须执行 `agate task handover` 触发自动化门禁自检与自包含 HTML 审查物证生成，确保交接单（`TASK.md`）状态流转为 `HANDOVER_READY` 后方可离场。
+- **终态归档契约**：任务最终交付时，必须执行 `agate task done` 执行全量门禁自检，将 `TASK.md` 状态流转为 `[DONE]` 终态并解绑释放租约互斥锁。
 
 ## 7. 记忆资产神圣公理与防泛化防线 (Memory Governance Rule)
 - **长期记忆只读与越权封锁**：`MEMORY.md` 是人类工程师沉淀的全局长期架构事实与避坑禁忌库，Agent **默认严格只读，绝对严禁私自直写**！
