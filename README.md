@@ -110,7 +110,7 @@ agate init -t all             # 全量挂载所有支持的 Agent 工具
   [+] 已生成 .ignore (索引防爆仓)
   [+] 已向 .git/info/exclude 注入 16 项隔离清单 (私有配置完全隐形)
   [+] 已挂载 cursor 规约 -> .cursorrules
-  [+] 已生成 AGENTS.md 骨架
+  [+] 已生成 MAP.md 架构地图骨架
   [+] 已生成 contexts/context.md (技术契约骨架)
   [+] 已挂载私有 pre-commit 门禁 -> agate verify --staged
   [+] 已挂载私有 pre-push 门禁 (物理防偷跑)
