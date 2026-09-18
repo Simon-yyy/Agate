@@ -1,7 +1,7 @@
 # 领域上下文地图 (Context Map)
 
 ## 1. 核心业务与领域模型
-- **单一事实源 (SSOT)**: 核心规约由 `internal/templates/SKILL.md` 固化，通过 `pkg/adapter` 分发映射至各大 Agent 工具配置文件；Codex 使用 `AGENTS.md` 内的受管区块。
+- **单一事实源 (SSOT)**: 核心规约由 `internal/templates/SKILL.md` 固化，通过 `pkg/adapter` 分发映射至各大 Agent 工具配置文件；Codex 使用 `AGENTS.md` 内的受管区块；项目架构拓扑独立收敛于 `MAP.md`，与 `contexts/context.md` 构成 3-Hop 寻路双地图。
 - **智能体指纹识别 (Agent Fingerprinting)**: 通过 `pkg/agent` 集中感知当前环境中的 Agent 类型（Codex, Cursor, Antigravity, Claude, Windsurf）及 CI 自动化标志，保障策略注入与状态机流转的精准对接。
 - **隐形隔离 (Invisible Isolation)**: AI 私有状态（`.agents/`, `.gemini/`, `.cursorrules`, `TASK.md`, `MEMORY.md` 等）仅注册在本地 `.git/info/exclude`，严禁污染团队公共 `.gitignore` 与 Git 提交树。
 - **闭环自检与两振熔断**: 代码变更后强制执行 `agate verify`（或 `agent-verify`），两振未果强制退出交还主控权。
