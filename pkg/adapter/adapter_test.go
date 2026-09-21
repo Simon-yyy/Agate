@@ -105,6 +105,15 @@ func TestResolveTargets(t *testing.T) {
 	if err != nil || len(resCodex) != 1 || resCodex[0] != TargetCodex {
 		t.Errorf("显式指定 codex 失败，得到: %v, err: %v", resCodex, err)
 	}
+
+	resEnv, err := ResolveTargetsForEnvironment(nil, tempDir, TargetCodex, true)
+	if err != nil || len(resEnv) != 1 || resEnv[0] != TargetCodex {
+		t.Errorf("环境识别目标失败，得到: %v, err: %v", resEnv, err)
+	}
+	resExplicit, err := ResolveTargetsForEnvironment([]string{"cursor"}, tempDir, TargetCodex, true)
+	if err != nil || len(resExplicit) != 1 || resExplicit[0] != TargetCursor {
+		t.Errorf("显式目标未覆盖环境识别，得到: %v, err: %v", resExplicit, err)
+	}
 }
 
 func TestDistributeCodexRulesPreservesAgentsMap(t *testing.T) {

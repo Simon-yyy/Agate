@@ -1,0 +1,35 @@
+name: Agate Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: agate / Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: Build Agate
+        run: go build -mod=vendor -o agate ./main.go
+      - name: Run Agate verification
+        run: ./agate ci verify
+      - name: Upload Agate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agate-review
+          path: .ai-memory/reviews/*.html
+          if-no-files-found: ignore

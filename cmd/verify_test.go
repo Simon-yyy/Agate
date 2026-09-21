@@ -76,6 +76,11 @@ func initTestGitRepo(t *testing.T) (string, func()) {
 		flagTaskNextAgent = "any"
 		flagTaskNote = ""
 		flagTaskSkipVerify = false
+		for _, name := range []string{"skip-guard", "strict", "staged", "report"} {
+			if flag := verifyCmd.Flags().Lookup(name); flag != nil {
+				flag.Changed = false
+			}
+		}
 	}
 	resetGlobalFlags()
 
@@ -177,6 +182,31 @@ func TestVerifyCmdStrictModeFailsWhenNoTests(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Errorf("在未配置任何测试套件的工程中启用 --strict 预期报错拦截，但返回了 nil")
+	}
+}
+
+func TestVerifyCmdStrictFlagOverridesProjectConfig(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".agate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".agate", "config.toml"), []byte("[guard]\nstrict = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd.SetArgs([]string{"verify"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("项目 strict=true 且未指定命令行参数时，应拒绝无测试工程")
+	}
+
+	rootCmd.SetArgs([]string{"verify", "--strict=false"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("显式 --strict=false 应覆盖项目配置，但返回错误: %v", err)
 	}
 }
 

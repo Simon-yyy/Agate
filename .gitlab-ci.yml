@@ -1,0 +1,13 @@
+stages:
+  - verify
+
+agate-verify:
+  stage: verify
+  image: golang:1.21
+  script:
+    - go build -mod=vendor -o agate ./main.go
+    - ./agate ci verify
+  artifacts:
+    when: always
+    paths:
+      - .ai-memory/reviews/

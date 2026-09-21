@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agate/pkg/config"
 	"agate/pkg/git"
 	"agate/pkg/guard"
 	"agate/pkg/harness"
@@ -39,6 +40,15 @@ var verifyCmd = &cobra.Command{
 		workDir := "."
 		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 			workDir = repoRoot
+		}
+		projectConfig, configPath, configErr := config.Load(workDir)
+		if configErr != nil {
+			return configErr
+		}
+		if configPath != "" {
+			for _, warning := range projectConfig.Warnings {
+				fmt.Printf("  \033[93m[i] %s\033[0m\n", warning)
+			}
 		}
 
 		var latestAuditResult *guard.AuditResult
@@ -110,8 +120,13 @@ var verifyCmd = &cobra.Command{
 			}
 		}
 
-		// Phase 1 动态测试调度
-		passed, summary, testErr := runDynamicTests(workDir, flagStrict)
+		// Phase 1 动态测试调度。未显式指定 --strict 时继承项目配置；
+		// 显式传入 --strict=false 也必须能够覆盖项目中的 strict=true。
+		effectiveStrict := projectConfig.Guard.Strict
+		if flagStrict || cmd.Flags().Changed("strict") {
+			effectiveStrict = flagStrict
+		}
+		passed, summary, testErr := runDynamicTests(workDir, effectiveStrict)
 		if testErr != nil || !passed {
 			return onFail("自检未通过，拒绝交付", testErr)
 		}

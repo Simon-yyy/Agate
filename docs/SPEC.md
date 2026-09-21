@@ -91,7 +91,29 @@ logs/
 
 ---
 
-## 四、 架构地图骨架标准 (MAP.md & contexts/context.md)
+## 四、 项目级配置规范 (`.agate/config.toml`)
+
+项目可以通过 `.agate/config.toml` 覆盖默认 Agent 目标、严格验证和 Hook 安装策略。优先级为：命令行参数 > 项目配置 > 当前 Agent 自动识别 > 项目已有配置 > 内置默认值。
+
+```toml
+[agent]
+targets = ["codex", "cursor"]
+
+[guard]
+strict = true
+todo = "warning"
+absolute_path = "error"
+large_file_mb = 20
+
+[hooks]
+install = true
+```
+
+`agent.targets`、`guard.strict` 和 `hooks.install` 当前生效。`guard.todo`、`guard.absolute_path` 与 `guard.large_file_mb` 当前作为可解析占位字段，Agate 会提示暂未启用对应策略，不会静默改变审计行为。配置语法错误或未知字段会阻止初始化/验证并返回错误。
+
+---
+
+## 五、 架构地图骨架标准 (MAP.md & contexts/context.md)
 
 ### 4.1 MAP.md 规范骨架
 ```markdown
@@ -131,7 +153,7 @@ logs/
 
 ---
 
-## 五、 退出码与物证协议标准 (L1 规范)
+## 六、 退出码与物证协议标准 (L1 规范)
 
 ### 5.1 CLI 退出码契约（Exit Codes）
 作为可被 CI、Git Hook 及自动化 Agent 调用的标准化工具，明确如下三态退出码：
@@ -159,7 +181,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 
 ---
 
-## 六、 自包含单文件 HTML 审查报告规范 (Self-contained Transcript)
+## 七、 自包含单文件 HTML 审查报告规范 (Self-contained Transcript)
 
 ### 6.1 审查载体设计规范
 针对人类审查、合规归档与异步复盘场景，`agate export` 与 `agate view` 遵循如下标准：
@@ -170,7 +192,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 
 ---
 
-## 七、 跨 Agent 任务接力与记忆治理规范 (Agate Relay)
+## 八、 跨 Agent 任务接力与记忆治理规范 (Agate Relay)
 
 ### 7.1 双模任务接力单规范 (TASK.md)
 1. **YAML Frontmatter 状态机**：必须包含 `task_id`、`title`、`status`、`current_agent`、`next_agent`、`receipt_html` 与 `updated_at`。各状态转换契约如下：
@@ -192,12 +214,25 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 
 ---
 
-## 八、 命名空间与专属品牌规范 (Namespace & Brand Standard)
+## 九、 命名空间与专属品牌规范 (Namespace & Brand Standard)
 
 ### 8.1 唯一专有命名空间
 系统在架构设计、命令行接口、Git Hook 门禁及配置路径上全面统一使用 `agate`（Agent Gate）专有品牌与命名空间，严禁保留历史旧别名：
 1. **CLI 命令与二进制**：全局仅使用 `agate` 独立可执行二进制；Git Hook 物理门禁（`pre-commit` / `pre-push`）仅识别并调用 `agate`；
 2. **私有隔离标识**：`.git/info/exclude` 仅使用 `# agate private tracking start` 与 `# agate private tracking end` 规范标记块；
 3. **全局规约路径**：规约探测引擎标准候选路径为 `~/.config/agate/rules.md` 与 `~/.agate/rules.md`。
+
+---
+
+## 十、 可选 Jev 语义判断适配规范（规划）
+
+Jev Skills 是 Agate 之外的可选判断能力，用于为语义模糊的检查点提供结构化建议；其不是 Agate 的运行时前置依赖，也不是安全、授权或合并决策边界。
+
+1. **适用范围**：仅可用于验证失败分流、任务交接完整度、候选 Agent/工具路由和审查优先级等无法由确定性规则充分表达的问题；
+2. **默认关闭与显式同意**：仅在用户明确启用时调用。API 模式必须先确认用户同意并仅检查密钥是否存在，严禁索取、回显、记录或提交密钥；
+3. **最小化与脱敏**：发送到外部服务的上下文必须去除密钥、个人路径、私有配置和无关源码，只保留完成当前判断所需的证据与候选项；
+4. **建议不等于授权**：Jev 输出不得放行 `pkg/guard` 拦截、跳过测试、解除 Hook、修改 CI 结果，亦不得直接触发提交、推送、发布、部署或合并；
+5. **不确定性处理**：`needs_review`、空值、未知结果、API 错误或上下文不足，必须转为人工确认或补充证据，不得静默重试、模拟或自动放行；
+6. **模拟模式标识**：在无 API 调用的 Agent 模拟模式中，输出必须明确标记为模拟，不得伪造 Jev 概率、置信度或调用回执。
 
 

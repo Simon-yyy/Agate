@@ -22,12 +22,14 @@
 
 - **执行本地自检**：`./verify.sh`（Linux/macOS）或 `verify.cmd`（Windows）
 - **调度 CLI 门禁**：`agate verify`（优先调度脚本，无脚本时探测语言测试套件）
+- **CI 远程门禁**：`agate ci verify`（强制严格模式并生成审查报告，供 GitHub Actions/GitLab CI 调用）
 - **单元测试套件**：`go test -mod=vendor -v ./...`
 
 ### 3. 工程初始化与治理
 
-- **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t codex,cursor,antigravity`）
+- **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t codex,cursor,antigravity`；未指定时按当前 Agent 环境自动选择）
 - **技术拓扑回填**：`agate scan --write`（自动探测技术栈与端口，同步回填 MAP.md 与 contexts/context.md）
+- **项目级策略配置**：`.agate/config.toml`（可覆盖 Agent 目标、严格模式和 Hook 安装策略）
 - **Git 私有隔离**：`agate isolate`（静默配置 `.git/info/exclude`）
 - **门禁生命周期**：`agate hook [install|uninstall|status]`
 
@@ -54,6 +56,7 @@
 - [cmd/root.go](cmd/root.go)：CLI 根命令定义、版本号与全局通用配置。
 - [cmd/init.go](cmd/init.go)：`agate init` 编排入口，按序驱动 .ignore、Git 隔离、规约分发、双地图骨架及本地 Hook 挂载。
 - [cmd/verify.go](cmd/verify.go)：`agate verify` 自检引擎，执行 Phase 0 安全红线审计与测试套件调度。
+- [cmd/ci.go](cmd/ci.go)：`agate ci verify` 远程门禁入口，固定启用严格校验与 HTML 物证报告。
 - [cmd/scan.go](cmd/scan.go)：`agate scan` 静态技术栈嗅探器与端口提取器，支持双地图回填。
 - [cmd/isolate.go](cmd/isolate.go)：`agate isolate` 命令行入口，独立触发 Git 隔离治理。
 - [cmd/hook.go](cmd/hook.go)：`agate hook` 命令行入口，管理本地 Git 门禁挂载状态。
@@ -113,6 +116,12 @@
 ### 9. 智能体指纹与注册中心 (`pkg/agent/`)
 
 - [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf）、自动化环境指纹嗅探器与类型注册表。
+- [pkg/config/config.go](pkg/config/config.go)：项目级 `.agate/config.toml` 加载、默认值、字段校验和占位策略提示。
+
+### 10. 可选语义决策适配层（规划）
+
+- **定位**：未来以独立适配器接入已安装的 Jev Skills，为任务接力、验证失败分流和审查排序提供语义建议。
+- **边界**：Jev 只输出建议与待复核信号，不替代 `pkg/guard`、测试、Git Hook 或 CI 的确定性放行条件；尚未引入运行时代码或网络依赖。
 
 ---
 

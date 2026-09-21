@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"agate/pkg/adapter"
+	agentinfo "agate/pkg/agent"
+	"agate/pkg/config"
 	"agate/pkg/git"
 	"agate/pkg/harness"
 
@@ -32,6 +34,10 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("获取当前工作目录失败: %w", err)
 		}
 		projectName := filepath.Base(pwd)
+		projectConfig, configPath, err := config.Load(pwd)
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("\033[94m[agate] 正在为工程 [%s] 挂载防护体系...\033[0m\n", projectName)
 
@@ -67,9 +73,25 @@ var initCmd = &cobra.Command{
 		}
 
 		// 4. 挂载规约 (智能按需探测或按指定分发)
-		targets, err := adapter.ResolveTargets(flagTargets, ".")
+		termProgram := os.Getenv("TERM_PROGRAM")
+		gitIPC := os.Getenv("VSCODE_GIT_IPC_HANDLE")
+		detectedAgent, detected := agentinfo.DetectEnvironment(os.Getenv, termProgram, gitIPC)
+		targetInputs := flagTargets
+		if len(targetInputs) == 0 && len(projectConfig.Agent.Targets) > 0 {
+			targetInputs = projectConfig.Agent.Targets
+		}
+		targets, err := adapter.ResolveTargetsForEnvironment(targetInputs, ".", adapter.AgentTarget(detectedAgent), detected)
 		if err != nil {
 			return err
+		}
+		if configPath != "" {
+			fmt.Printf("  \033[96m[i] 已加载项目配置 -> %s\033[0m\n", configPath)
+			for _, warning := range projectConfig.Warnings {
+				fmt.Printf("  \033[93m[i] %s\033[0m\n", warning)
+			}
+		}
+		if len(targetInputs) == 0 && detected {
+			fmt.Printf("  \033[96m[i] 已识别当前 Agent 环境: %s，将自动挂载对应规约\033[0m\n", detectedAgent)
 		}
 
 		globalRules, sourcePath, err := adapter.LoadGlobalRules()
@@ -100,7 +122,7 @@ var initCmd = &cobra.Command{
 
 		// 6. 安装本地 Git 物理双重门禁
 		var partialWarnings []string
-		if git.IsGitRepo() && !flagNoHook {
+		if git.IsGitRepo() && !flagNoHook && projectConfig.Hooks.Install {
 			if err := git.InstallHooks(); err != nil {
 				partialWarnings = append(partialWarnings, fmt.Sprintf("Git 物理门禁未就绪: %v (可稍后运行 `agate hook install` 重试)", err))
 				fmt.Printf("  \033[93m[!] 挂载 Git 物理门禁提示: %v\033[0m\n", err)

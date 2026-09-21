@@ -8,6 +8,14 @@ import (
 )
 
 func TestInitCmdSuccess(t *testing.T) {
+	// 测试默认目标策略时隔离宿主 Codex 环境指纹，避免环境相关结果污染断言。
+	for _, key := range []string{
+		"CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_VERSION", "CODEX_CI", "CODEX_SHELL",
+		"CURSOR_AGENT", "CURSOR_VERSION", "ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE",
+		"CLAUDE_CODE", "CLAUDE_AGENT", "WINDSURF_AGENT", "TERM_PROGRAM", "VSCODE_GIT_IPC_HANDLE",
+	} {
+		t.Setenv(key, "")
+	}
 	tempDir, err := os.MkdirTemp("", "agate-init-test-*")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)

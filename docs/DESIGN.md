@@ -113,7 +113,31 @@ agate/
 └── main.go
 ```
 
-### 3.2 跨平台软链与优雅降级算法
+### 3.2 项目配置与 Agent 分发策略
+
+初始化目标采用确定性优先级：显式 `-t` 参数优先，其次读取 `.agate/config.toml` 的 `agent.targets`，再识别当前 Agent 环境，随后探测项目已有 Agent 文件，最后才使用默认目标。这样既支持 Codex 当前终端自动挂载 `AGENTS.md`，也保留用户对多 Agent 项目的显式控制。
+
+项目配置由 `pkg/config` 负责加载和校验。配置模块只暴露解析后的策略对象，命令层负责把策略传给 `pkg/adapter`、Hook 安装和验证调度，避免各模块自行读取 TOML 造成规则漂移。
+
+### 3.3 CI 远程门禁
+
+`.github/workflows/agate.yml` 在 Pull Request 和 `main` 推送事件中执行 `agate ci verify`；GitLab 可使用 `.gitlab-ci.yml`。该入口固定启用严格验证和 HTML 报告。本地 `pre-commit` / `pre-push` 属于开发体验层，远程 CI 才是最终合并裁决层；即使本地使用 `--no-verify` 绕过 Hook，Required status check 仍会阻止未通过的 Pull Request 合并。
+
+### 3.4 可选 Jev 语义决策适配层（规划）
+
+Agate 的核心职责是可复现的确定性门禁：扫描、测试、Hook 与 CI 的结果直接形成允许或阻断。Jev Skills 适合承担另一类问题：当证据完整但结论无法用简单规则描述时，对候选恢复路径、任务交接完整度、Agent 接手建议和审查优先级给出结构化判断。
+
+```text
+确定性事实（Guard / Test / Hook / CI）
+                ↓
+可选 Jev 语义建议（choice / score / needs_review）
+                ↓
+当前 Agent 或人类确认下一步
+```
+
+该适配层必须保持可插拔和默认关闭，避免破坏 Agate 的单二进制、离线可用与零外部运行时依赖特征。Jev 的选择结果不等价于授权：不能放行安全问题、绕过测试、解除 Git Hook，也不能触发提交、推送或合并。API 调用前需用户明确同意，输入必须脱敏并最小化；无法判断、`needs_review` 或 API 失败时只能转人工，不得静默模拟或放行。
+
+### 3.5 跨平台软链与优雅降级算法
 在 Windows 环境下，普通用户通常没有 `SeCreateSymbolicLinkPrivilege` 权限。若盲目调用 `os.Symlink` 会抛出 `A required privilege is not held by the client` 错误。
 
 `agate` 采用如下两段式容错机制：
@@ -134,7 +158,7 @@ func LinkOrCopy(src, dst string) error {
 }
 ```
 
-### 3.3 验证调度状态机 (`agate verify`)
+### 3.6 验证调度状态机 (`agate verify`)
 `agate verify` 为 Agent 提供确定性的交付验收门禁，其执行遵循严格的两阶段防御：
 
 ```mermaid
@@ -158,7 +182,7 @@ graph TD
     ResultCheck -->|否| ExitFail
 ```
 
-### 3.4 关键工程优化与安全设计
+### 3.7 关键工程优化与安全设计
 
 #### 1. 崩溃安全原子写入 (`pkg/harness/fs.go:WriteFileAtomic`)
 规约分发或模板更新时，直接调用 `os.WriteFile` 在遇到断电或强杀时容易造成半截文件损坏。Agate 采用标准的崩溃安全原子模式：
@@ -176,7 +200,7 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
 - 优先通过 `git show :<path>` 直接读取 Git Index 中的暂存内容，而非工作区物理文件；
 - 仅当暂存区内容触发安全红线时阻断，未暂存的本地探索性脏代码互不干扰。
 
-### 3.5 跨 Agent 任务接力与状态机设计 (Agate Relay)
+### 3.8 跨 Agent 任务接力与状态机设计 (Agate Relay)
 为了支持开发者在多款 AI 编程助手（Cursor、Antigravity、Claude Code、Windsurf）之间丝滑接力，Agate 引入了轻量级离线任务中枢：
 
 1. **状态机全生命周期驱动**：
@@ -203,13 +227,13 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
    - 每次交接在 `TASK.md` 正文末尾自动追加结构化表格行，记录交接时间、From/To、HTML 审查物证与批注；
    - 解析时采用通用非贪婪二级标题截断与 CRLF 归一化，彻底防御 Markdown 表格对“暗坑警示”四要素的污染。
 
-### 3.6 自包含单文件 HTML 审查报告引擎 (Agate Reporter)
+### 3.9 自包含单文件 HTML 审查报告引擎 (Agate Reporter)
 用于解决团队异步代码评审、自检物证核验与合规归档：
 - **纯原生自包含**：HTML 模板内嵌样式与折叠脚本，零外部 CDN 网络依赖，脱网双击即看；
 - **全量汇聚**：聚合展示 Phase 0 7 大安全红线体检、Git 分支与暂存区/工作区 Diff 对比、当前任务状态机与自动化单测控制台日志；
 - **跨平台弹出**：`pkg/reporter/browser.go` 原生支持 Windows (`cmd /c start`)、macOS (`open`) 与 Linux (`xdg-open`) 浏览器秒级自动唤起。
 
-### 3.7 两振熔断机制 (Two-Strike Circuit Breaker) 物理实现
+### 3.10 两振熔断机制 (Two-Strike Circuit Breaker) 物理实现
 为了在物理层彻底杜绝 AI Agent 面对报错盲目猜测、反复死循环改动代码：
 - `cmd/verify.go` 在 `.ai-memory/.verify_streak` 中原子维护连续自检失败计数；
 - 只要有任意一次自检成功通过，计数器即刻原子重置为 0；
@@ -248,7 +272,14 @@ Agate 在初始化扫描上下文时，单次执行 `git -c core.quotepath=false
 - [x] 两振熔断机制（Two-Strike Circuit Breaker）：物理失败计数器与终端红框拦截；
 - [x] 跨平台 CRLF 归一化与防御强化。
 
-### Phase 3: CI/CD 接入与云端发布（已完成落地）
+### Phase 3: CI/CD 接入与云端发布（部分完成）
 - [x] GitHub Actions Goreleaser 跨平台全自动发版流水线；
 - [x] 语义化版本自动化发布脚本（`./scripts/bump.sh`）；
+- [x] Pull Request 与 `main` 推送的 Agate 严格验证及 HTML 报告 Artifact；
 - [ ] 规则一致性校验（`agate check --strict`），防止本地规约被手动意外篡改。
+
+### Phase 4: 可选语义决策辅助（规划）
+- [ ] 定义 Jev 适配器接口与本地审查物证格式；
+- [ ] 在 `agate task` 中提供交接完整度与接手建议，但不自动流转状态；
+- [ ] 在 `agate verify` 中提供失败分流建议，但不改变 PASS/FAIL 结果；
+- [ ] 建立脱敏、用户同意与 `needs_review` 人工升级机制。

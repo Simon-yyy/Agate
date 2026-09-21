@@ -102,6 +102,10 @@ agate init -t antigravity     # 针对 Antigravity (.gemini/GEMINI.md)
 agate init -t claude          # 仅针对 Claude Code (CLAUDE.md)
 agate init -t windsurf        # 仅针对 Windsurf (.windsurfrules)
 agate init -t all             # 全量挂载所有支持的 Agent 工具
+
+# 未指定 -t 时，agate 会优先识别当前运行中的 Agent，再回退到项目已有配置
+
+# 可选：项目级配置请保存为 .agate/config.toml，示例见下文
 ```
 
 执行初始化后，项目即刻具备完整的防护体系：
@@ -122,6 +126,26 @@ agate init -t all             # 全量挂载所有支持的 Agent 工具
 挂载完成后，可在与 AI 的首轮对话中发送以下提示词，指导 AI 自动完善架构地图：
 > *“阅读 MAP.md 与 contexts/context.md 骨架，结合当前代码目录，简要补齐各模块核心职责与关键入口。”*
 
+### 2.1 项目级配置
+
+可在项目根目录创建 `.agate/config.toml`，让项目覆盖默认 Agent、严格验证和 Hook 策略：
+
+```toml
+[agent]
+targets = ["codex", "cursor"]
+
+[guard]
+strict = true
+todo = "warning"        # 占位配置：读取并提示，当前不改变审计行为
+absolute_path = "error" # 占位配置：读取并提示，当前不改变审计行为
+large_file_mb = 20      # 占位配置：读取并提示，当前不改变审计行为
+
+[hooks]
+install = true
+```
+
+配置优先级为：命令行参数 > 项目配置 > 当前 Agent 自动识别 > 项目已有配置 > 内置默认值。配置文件不存在时，Agate 保持默认行为；不支持的格式或字段会直接报错，避免静默失效。
+
 ### 3. 闭环自检与交付验证
 
 在 AI 修改代码完毕或提交前，执行自检：
@@ -136,6 +160,24 @@ agate verify --strict       # 严格模式：未检测到自检脚本或测试�
 agate verify --skip-guard   # 应急逃生模式：跳过 Phase 0 安全扫描，仅运行测试脚本
 ```
 自检通过将输出 `[PASS]` 结果；如连续两次失败，AI 必须停手熔断交还主控权。
+
+#### CI 与远程合并门禁
+
+仓库提供 `.github/workflows/agate.yml`，会在 Pull Request 和 `main` 分支推送时执行 `agate ci verify`，并上传 HTML 审查报告 Artifact；GitLab 项目可直接使用根目录的 `.gitlab-ci.yml`。请在 GitHub 仓库设置中将 `agate / Verify` 配置为 Required status check，才能把它作为远程合并门禁。
+
+本地 Hook 用于即时反馈，CI 用于远程最终裁决；即使本地绕过 Hook，未通过 CI 的 Pull Request 仍不能合并。
+
+CI 环境也可以直接运行：
+
+```bash
+agate ci verify
+```
+
+#### Jev 可选语义决策辅助（规划中）
+
+Agate 的安全扫描、测试、Git Hook 与 CI 仍是本地确定性门禁。若当前 Agent 已安装 [Jev Skills](https://github.com/wuyoscar/jev-skill)，未来可将其作为**可选建议层**，处理不适合硬编码的语义判断，例如：验证失败后的恢复路径、任务交接是否信息充分、多个 Agent 的接手建议，以及审查报告的风险排序。
+
+Jev 结果不具备授权效力，不能放行安全扫描、跳过测试、提交/推送代码或批准合并；`needs_review` 必须转为人工确认。API 模式仅在用户明确同意且本机已配置密钥后使用，并且只允许发送脱敏后的最小必要上下文；未配置 API 时可使用明确标注的 Agent 模拟模式。当前版本不会自动调用 Jev，也不会上传源码或修改现有门禁行为。
 
 ### 4. 架构资产智能同步回填
 

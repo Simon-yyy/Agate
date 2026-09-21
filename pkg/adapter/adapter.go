@@ -72,6 +72,12 @@ var SupportedTargets = map[string]AgentTarget{
 
 // ResolveTargets 解析最终待挂载的目标 Agent 清单（包含合法性校验与去重）
 func ResolveTargets(explicitTargets []string, root string) ([]AgentTarget, error) {
+	return ResolveTargetsForEnvironment(explicitTargets, root, "", false)
+}
+
+// ResolveTargetsForEnvironment 按“显式参数 > 当前 Agent > 项目文件 > 默认值”解析目标。
+// detectedOK 为 false 时不使用 detected，便于调用方在无法识别环境时自然回退。
+func ResolveTargetsForEnvironment(explicitTargets []string, root string, detected AgentTarget, detectedOK bool) ([]AgentTarget, error) {
 	if len(explicitTargets) > 0 {
 		hasAll := false
 		seen := make(map[AgentTarget]bool)
@@ -103,6 +109,10 @@ func ResolveTargets(explicitTargets []string, root string) ([]AgentTarget, error
 		if len(targets) > 0 {
 			return targets, nil
 		}
+	}
+
+	if detectedOK {
+		return []AgentTarget{detected}, nil
 	}
 
 	// 优先嗅探已有环境
