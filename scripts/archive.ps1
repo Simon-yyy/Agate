@@ -43,6 +43,9 @@ $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$winVerDir/agate.exe" main.go
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows amd64 构建失败，退出码: $LASTEXITCODE"
+}
 
 # 2. Linux amd64
 Write-Host "[2/3] 构建 Linux amd64 ($linuxVerDir/agate)..." -ForegroundColor Gray
@@ -50,6 +53,9 @@ $env:CGO_ENABLED = "0"
 $env:GOOS = "linux"
 $env:GOARCH = "amd64"
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$linuxVerDir/agate" main.go
+if ($LASTEXITCODE -ne 0) {
+    throw "Linux amd64 构建失败，退出码: $LASTEXITCODE"
+}
 
 # 3. macOS Intel & ARM64
 Write-Host "[3/3] 构建 macOS Intel & ARM64 ($darwinVerDir/)..." -ForegroundColor Gray
@@ -57,11 +63,17 @@ $env:CGO_ENABLED = "0"
 $env:GOOS = "darwin"
 $env:GOARCH = "amd64"
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$darwinVerDir/agate_amd64" main.go
+if ($LASTEXITCODE -ne 0) {
+    throw "macOS amd64 构建失败，退出码: $LASTEXITCODE"
+}
 
 $env:CGO_ENABLED = "0"
 $env:GOOS = "darwin"
 $env:GOARCH = "arm64"
 & $goCmd build -mod=vendor -ldflags="-s -w" -o "$darwinVerDir/agate_arm64" main.go
+if ($LASTEXITCODE -ne 0) {
+    throw "macOS arm64 构建失败，退出码: $LASTEXITCODE"
+}
 
 # 清理环境变量
 Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue

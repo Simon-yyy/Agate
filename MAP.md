@@ -22,6 +22,7 @@
 
 - **执行本地自检**：`./verify.sh`（Linux/macOS）或 `verify.cmd`（Windows）
 - **调度 CLI 门禁**：`agate verify`（优先调度脚本，无脚本时探测语言测试套件）
+- **熔断人工恢复**：`agate verify --resume-after-break`（由人类确认已排查修复后解除两振硬熔断并重试验证）
 - **CI 远程门禁**：`agate ci verify`（强制严格模式并生成审查报告，供 GitHub Actions/GitLab CI 调用）
 - **单元测试套件**：`go test -mod=vendor -v ./...`
 
@@ -116,9 +117,12 @@
 ### 9. 智能体指纹与注册中心 (`pkg/agent/`)
 
 - [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf）、自动化环境指纹嗅探器与类型注册表。
-- [pkg/config/config.go](pkg/config/config.go)：项目级 `.agate/config.toml` 加载、默认值、字段校验和占位策略提示。
 
-### 10. 可选语义决策适配层（规划）
+### 10. 项目级策略配置加载 (`pkg/config/`)
+
+- [pkg/config/config.go](pkg/config/config.go)：项目级 `.agate/config.toml` 加载、默认值合并、字段合规校验与占位策略提示。
+
+### 11. 可选语义决策适配层（规划）
 
 - **定位**：未来以独立适配器接入已安装的 Jev Skills，为任务接力、验证失败分流和审查排序提供语义建议。
 - **边界**：Jev 只输出建议与待复核信号，不替代 `pkg/guard`、测试、Git Hook 或 CI 的确定性放行条件；尚未引入运行时代码或网络依赖。

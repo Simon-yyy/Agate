@@ -213,3 +213,43 @@ func TestDoneTaskAndQuartetClean(t *testing.T) {
 		t.Errorf("GetTaskStatus 应包含 RecentTimeline")
 	}
 }
+
+func TestOnlyLockOwnerCanHandoverOrCompleteTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+	if _, _, err := ClaimTask(tmpDir, "owner", false); err != nil {
+		t.Fatalf("准备持锁任务失败: %v", err)
+	}
+
+	if _, _, err := HandoverTask(HandoverOptions{RootDir: tmpDir, CurrentAgent: "intruder", SkipVerify: true}); err == nil {
+		t.Fatal("非持锁 Agent 执行 handover 必须被拒绝")
+	}
+	manifest, err := LoadTaskBoard(filepath.Join(tmpDir, "TASK.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Status != StatusClaimed {
+		t.Fatalf("越权 handover 后任务状态不得变化，实际: %s", manifest.Status)
+	}
+
+	if _, _, err := DoneTask(HandoverOptions{RootDir: tmpDir, CurrentAgent: "intruder", SkipVerify: true}); err == nil {
+		t.Fatal("非持锁 Agent 执行 done 必须被拒绝")
+	}
+	manifest, err = LoadTaskBoard(filepath.Join(tmpDir, "TASK.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Status != StatusClaimed {
+		t.Fatalf("越权 done 后任务状态不得变化，实际: %s", manifest.Status)
+	}
+}
+
+func TestClaimTaskRejectsDoneTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := SaveTaskBoard(filepath.Join(tmpDir, "TASK.md"), &TaskManifest{TaskId: "TASK-DONE", Title: "已完成任务", Status: StatusDone, CurrentAgent: "owner", NextAgent: "none", ReceiptHTML: "none", LastVerifiedAt: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ClaimTask(tmpDir, "new-agent", false); err == nil {
+		t.Fatal("DONE 状态任务不得被重新认领")
+	}
+}

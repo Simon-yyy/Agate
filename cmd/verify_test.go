@@ -68,6 +68,7 @@ func initTestGitRepo(t *testing.T) (string, func()) {
 		flagStrict = false
 		flagStaged = false
 		flagReport = false
+		flagResumeAfterBreak = false
 		flagExportOutput = ""
 		flagExportOpen = false
 		flagExportStaged = false
@@ -76,7 +77,7 @@ func initTestGitRepo(t *testing.T) (string, func()) {
 		flagTaskNextAgent = "any"
 		flagTaskNote = ""
 		flagTaskSkipVerify = false
-		for _, name := range []string{"skip-guard", "strict", "staged", "report"} {
+		for _, name := range []string{"skip-guard", "strict", "staged", "report", "resume-after-break"} {
 			if flag := verifyCmd.Flags().Lookup(name); flag != nil {
 				flag.Changed = false
 			}
@@ -182,6 +183,104 @@ func TestVerifyCmdStrictModeFailsWhenNoTests(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil {
 		t.Errorf("在未配置任何测试套件的工程中启用 --strict 预期报错拦截，但返回了 nil")
+	}
+}
+
+func TestVerifyCmdPreservesStrictFailureReason(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"verify", "--strict"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("严格模式无测试工程必须失败")
+	}
+	if !strings.Contains(buf.String(), "未检测到自检脚本或测试套件") {
+		t.Fatalf("严格模式失败必须保留根因，实际输出: %s", buf.String())
+	}
+}
+
+func TestVerifyCmdFailsWhenReportCannotBeWritten(t *testing.T) {
+	tempDir, cleanup := initTestGitRepo(t)
+	defer cleanup()
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ai-memory"), []byte("not-a-directory"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rootCmd.SetArgs([]string{"verify", "--report"})
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "生成 HTML 审查物证报告失败") {
+		t.Fatalf("报告生成失败必须作为 verify 失败返回，实际: %v", err)
+	}
+}
+
+func TestRunDynamicTestsRejectsNpmProjectWithoutTestScript(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(`{"name":"sample","scripts":{"build":"echo build"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	passed, summary, err := runDynamicTests(tempDir, true)
+	if err == nil || passed {
+		t.Fatalf("严格模式必须拒绝无 scripts.test 的 npm 项目: passed=%t summary=%q err=%v", passed, summary, err)
+	}
+	if !strings.Contains(summary, "未检测到") {
+		t.Fatalf("无测试脚本应明确说明未执行测试，实际: %q", summary)
+	}
+}
+
+func TestInspectFrameworkTestUsesMavenTestGoal(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "pom.xml"), []byte("<project/>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate, ok := inspectFrameworkTest(tempDir)
+	if !ok {
+		t.Fatal("存在 pom.xml 时应识别 Maven 测试候选项")
+	}
+	if candidate.command != "mvn" || strings.Join(candidate.args, " ") != "test -q" {
+		t.Fatalf("Maven 必须运行真实测试 mvn test -q，实际: %s %s", candidate.command, strings.Join(candidate.args, " "))
+	}
+}
+
+func TestDetectCustomScriptSkipsUnusableWindowsBash(t *testing.T) {
+	if runtime.GOOS != "windows" || bashUsable() {
+		t.Skip("仅验证 Windows 下不可用 Bash 的降级路径")
+	}
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "verify.sh"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script, shell, args := detectCustomScript(tempDir)
+	if script != "" || shell != "" || args != nil {
+		t.Fatalf("不可用 Bash 时必须回退框架探测，实际: script=%q shell=%q args=%v", script, shell, args)
+	}
+}
+
+func TestRunDynamicTestsCapturesScriptOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	name := "verify.sh"
+	content := "#!/bin/sh\necho report-evidence\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		name = "verify.cmd"
+		content = "@echo off\r\necho report-evidence\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, name), []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	passed, summary, err := runDynamicTests(tempDir, false)
+	if err != nil || !passed {
+		t.Fatalf("自检脚本应通过: passed=%t err=%v", passed, err)
+	}
+	if !strings.Contains(summary, "report-evidence") {
+		t.Fatalf("报告摘要必须包含真实脚本输出，实际: %q", summary)
 	}
 }
 
@@ -294,6 +393,13 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 		t.Errorf("连续第二次失败预期触发两振熔断警示，实际输出: %s", buf.String())
 	}
 
+	// Strike 3: 熔断后未经人工恢复不得再次执行脚本。
+	buf.Reset()
+	rootCmd.SetArgs([]string{"verify"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("两振熔断后未显式恢复必须拒绝第三次执行")
+	}
+
 	// 修复脚本，变为通过
 	if runtime.GOOS == "windows" {
 		if err := os.WriteFile(verifyScript, []byte("@echo off\r\nexit /b 0\r\n"), 0755); err != nil {
@@ -303,7 +409,7 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 		t.Fatalf("修复测试自检脚本失败: %v", err)
 	}
 	buf.Reset()
-	rootCmd.SetArgs([]string{"verify"})
+	rootCmd.SetArgs([]string{"verify", "--resume-after-break"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("自检通过执行失败: %v", err)
 	}
@@ -314,3 +420,19 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 		t.Errorf("自检成功后计数文件应被清除重置")
 	}
 }
+
+func TestTailLines(t *testing.T) {
+	if got := tailLines("", 10); got != "" {
+		t.Errorf("期望空字符串，实际得到: %q", got)
+	}
+	inputShort := "line1\nline2\nline3"
+	if got := tailLines(inputShort, 5); got != inputShort {
+		t.Errorf("短文本不应截断，期望: %q, 实际: %q", inputShort, got)
+	}
+	inputLong := "1\n2\n3\n4\n5"
+	got := tailLines(inputLong, 2)
+	if !strings.Contains(got, "前 3 行已截断") || !strings.Contains(got, "4\n5") {
+		t.Errorf("长文本截断异常: %s", got)
+	}
+}
+

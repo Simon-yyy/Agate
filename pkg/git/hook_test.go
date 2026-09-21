@@ -373,3 +373,55 @@ func TestPrePushHookAuthorization(t *testing.T) {
 		t.Errorf("存在 CURSOR_AGENT 且未授权时预期被强行拦截，但通过: %s", string(outAgent))
 	}
 }
+
+func TestHookScriptsContainAgateMarker(t *testing.T) {
+	for name, script := range map[string]string{"pre-commit": preCommitScript, "pre-push": prePushScript} {
+		if !strings.Contains(script, "# --- agate hook: "+name+" ---") {
+			t.Errorf("%s 脚本缺少 SPEC 3.2.2 规定的标识行 `# --- agate hook: %s ---`", name, name)
+		}
+		if !isAgateManagedHook(script) {
+			t.Errorf("%s 脚本应被识别为 agate 托管", name)
+		}
+	}
+}
+
+func TestIsAgateManagedHookRejectsForeignHooks(t *testing.T) {
+	foreign := "#!/bin/sh\n# my own hook with the word agate mentioned in a comment\necho hi\n"
+	if isAgateManagedHook(foreign) {
+		t.Errorf("普通自定义钩子不应被误判为 agate 托管 (误删风险)")
+	}
+	legacy := "#!/bin/sh\n# agate 自动生成的 pre-commit 验证门禁\nexit 0\n"
+	if !isAgateManagedHook(legacy) {
+		t.Errorf("历史版本 agate 钩子应被兼容识别 (卸载兼容)")
+	}
+}
+
+func TestBackupExistingHookCreatesBak(t *testing.T) {
+	tmpDir := t.TempDir()
+	hookPath := filepath.Join(tmpDir, "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\n# user custom hook\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := backupExistingHook(hookPath); err != nil {
+		t.Fatalf("备份自定义钩子失败: %v", err)
+	}
+	bak, err := os.ReadFile(hookPath + ".agate.bak")
+	if err != nil {
+		t.Fatalf("应生成 .agate.bak 备份: %v", err)
+	}
+	if !strings.Contains(string(bak), "user custom hook") {
+		t.Errorf("备份内容与原文件不一致")
+	}
+
+	if err := os.WriteFile(hookPath, []byte(preCommitScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(hookPath + ".agate.bak")
+	if err := backupExistingHook(hookPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(hookPath + ".agate.bak"); err == nil {
+		t.Errorf("托管钩子重装不应再产生备份文件")
+	}
+}
+

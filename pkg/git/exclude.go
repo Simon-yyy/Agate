@@ -25,6 +25,7 @@ var DefaultExcludedItems = []string{
 	"TASK.md",
 	"MEMORY.md",
 	".ignore",
+	"*.agate.bak",
 	".vscode/",
 	"*.log",
 	"logs/",

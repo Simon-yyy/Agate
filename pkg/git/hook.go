@@ -11,6 +11,7 @@ import (
 )
 
 const preCommitScript = `#!/usr/bin/env bash
+# --- agate hook: pre-commit ---
 # agate 自动生成的 pre-commit 验证门禁 (针对 Git 暂存区 Index 精准审计)
 set -e
 
@@ -31,6 +32,7 @@ exit 0
 `
 
 const prePushScript = `#!/usr/bin/env bash
+# --- agate hook: pre-push ---
 # agate 自动生成的 pre-push 验证门禁与防越权硬卡口
 set -e
 
@@ -77,6 +79,47 @@ fi
 exit 0
 `
 
+// agateHookMarker SPEC 3.2.2 规定的 Hook 专用标识行前缀，用于精准识别 agate 托管钩子
+const agateHookMarker = "# --- agate hook: "
+
+// isAgateManagedHook 判断钩子脚本内容是否由 agate 管理。
+// 新版按 SPEC 标识行识别；同时兼容历史版本脚本注释 ("agate 自动生成")。
+func isAgateManagedHook(content string) bool {
+	return strings.Contains(content, agateHookMarker) || strings.Contains(content, "agate 自动生成")
+}
+
+// backupExistingHook 在覆盖写入前，将已存在的非 agate 托管钩子自动备份为 *.agate.bak
+func backupExistingHook(hookPath string) error {
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		return nil // 无既有文件，无需备份
+	}
+	if isAgateManagedHook(string(content)) {
+		return nil // agate 自己的旧版本钩子，直接覆盖即可
+	}
+	backupPath := hookPath + ".agate.bak"
+	if err := harness.CopyFile(hookPath, backupPath); err != nil {
+		return fmt.Errorf("备份既有自定义钩子失败 [%s -> %s]: %w", hookPath, backupPath, err)
+	}
+	fmt.Printf("  \033[93m[!] 发现既有自定义钩子 [%s]，已自动安全备份至 %s\033[0m\n", hookPath, backupPath)
+	return nil
+}
+
+// restoreHookBackups 在卸载时还原安装前的自定义钩子备份 (SPEC 3.2.1: 精准清理还原)
+func restoreHookBackups(hookDir string) {
+	for _, name := range []string{"pre-commit", "pre-push"} {
+		p := filepath.Join(hookDir, name)
+		bak := p + ".agate.bak"
+		if _, err := os.Stat(bak); err != nil {
+			continue
+		}
+		// 还原备份 (覆盖 agate 钩子或空位)
+		if err := os.Rename(bak, p); err != nil {
+			_ = harness.CopyFile(bak, p) // 跨卷兜底
+		}
+	}
+}
+
 // InstallHooks 安装基于 core.hooksPath 的本地 pre-commit 与 pre-push 双重物理硬门禁
 func InstallHooks() error {
 	gitCommonDir, err := GetGitCommonDir()
@@ -101,14 +144,20 @@ func InstallHooks() error {
 		}
 	}
 
-	// 2. 写入 pre-commit
+	// 2. 写入 pre-commit (若已存在非 agate 管理的钩子，先按 SPEC 3.2.1 自动备份而非静默覆盖)
 	preCommitPath := filepath.Join(hookDir, "pre-commit")
+	if err := backupExistingHook(preCommitPath); err != nil {
+		return err
+	}
 	if err := harness.WriteFileAtomic(preCommitPath, []byte(preCommitScript), 0755); err != nil {
 		return fmt.Errorf("写入 pre-commit 脚本失败: %w", err)
 	}
 
-	// 3. 写入 pre-push
+	// 3. 写入 pre-push (同上先备份既有非托管钩子)
 	prePushPath := filepath.Join(hookDir, "pre-push")
+	if err := backupExistingHook(prePushPath); err != nil {
+		return err
+	}
 	if err := harness.WriteFileAtomic(prePushPath, []byte(prePushScript), 0755); err != nil {
 		return fmt.Errorf("写入 pre-push 脚本失败: %w", err)
 	}
@@ -150,9 +199,17 @@ func UninstallHooks() error {
 		_ = exec.Command("git", "config", "--local", "--unset", "core.hooksPath").Run()
 	}
 
-	// 2. 精准删除 agate 生成的文件，保护用户其它自定义钩子
-	_ = os.Remove(filepath.Join(hookDir, "pre-commit"))
-	_ = os.Remove(filepath.Join(hookDir, "pre-push"))
+	// 2. 精准清理: 先还原安装前的自定义钩子备份, 再移除 agate 托管钩子,
+	//    非 agate 管理的用户钩子 (无标识行且无备份) 完好保留
+	restoreHookBackups(hookDir)
+	for _, name := range []string{"pre-commit", "pre-push"} {
+		p := filepath.Join(hookDir, name)
+		if content, err := os.ReadFile(p); err == nil {
+			if isAgateManagedHook(string(content)) {
+				_ = os.Remove(p)
+			}
+		}
+	}
 	_ = os.Remove(origHooksPathFile)
 
 	// 3. 仅当目录为空时，才安全移除 custom-hooks 目录
@@ -219,14 +276,14 @@ func GetHookStatus(dir ...string) (HookStatusInfo, error) {
 	preCommitPath := filepath.Join(effectiveHookDir, "pre-commit")
 	if content, err := os.ReadFile(preCommitPath); err == nil {
 		status.PreCommitExists = true
-		status.PreCommitAgate = strings.Contains(string(content), "agate")
+		status.PreCommitAgate = isAgateManagedHook(string(content))
 	}
 
 	// 检查 pre-push
 	prePushPath := filepath.Join(effectiveHookDir, "pre-push")
 	if content, err := os.ReadFile(prePushPath); err == nil {
 		status.PrePushExists = true
-		status.PrePushAgate = strings.Contains(string(content), "agate") || strings.Contains(string(content), "ALLOW_AUTOMATED_PUSH")
+		status.PrePushAgate = isAgateManagedHook(string(content)) || strings.Contains(string(content), "ALLOW_AUTOMATED_PUSH")
 	}
 
 	return status, nil

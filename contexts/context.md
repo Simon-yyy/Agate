@@ -11,8 +11,8 @@
 ## 2. 关键 API 与环境约定
 - **CLI 命令契约**:
   - `agate init`: 初始化项目 AI 研发护栏与地图资产；
-  - `agate isolate`: 注入本地私有排除规则（16 项隐形隔离清单，含 .env*）；
-  - `agate verify [--staged] [--strict] [--skip-guard] [--report]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断；支持 `--report` 自动生成 HTML 审查报告；
+  - `agate isolate`: 注入本地私有排除规则（17 项隐形隔离清单，含 .env* 与 *.agate.bak）；
+  - `agate verify [--staged] [--strict] [--skip-guard] [--report] [--resume-after-break]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断，后续运行须由人类显式传入 `--resume-after-break` 才可恢复；支持 `--report` 自动生成 HTML 审查报告；
   - `agate ci verify`: CI/远程合并门禁入口，固定启用严格校验与 HTML 审查报告，适用于 GitHub Actions、GitLab CI 等流水线；
   - `agate export [-o <path>] [--open] [--staged]`: 汇聚安全审计、Diff 对比、任务与自检日志，编译自包含单文件 HTML 审查报告；
   - `agate view`: 在系统默认浏览器中一键预览最新生成的 HTML 审查报告；
@@ -40,5 +40,5 @@
 
 ## 4. 跨 Agent 任务接力与记忆资产防线 (Relay & Memory Governance)
 - **接力四要素与状态机**：`TASK.md` 采用标准 YAML Frontmatter + Markdown 结构；换工具前必须执行 `agate task handover` 固化物证，新工具启动首句执行 `agate task resume` 接棒，全量任务交付归档执行 `agate task done`。
-- **并发租约锁**：`.ai-memory/locks/task.lock` 提供软互斥保护，防止多 IDE 同时施工冲突。
+- **并发租约锁与过渡守护**：`.ai-memory/locks/task.lock` 提供租约互斥，配对 `.transition` 原子守护排他创建，防止并发抢锁竞态；`handover` 与 `done` 强制校验当前 Agent 锁所有权，`DONE` 终态任务禁止重新认领。
 - **长期记忆神圣公理**：`MEMORY.md` 默认只读，严禁 Agent 私自直写；在途偶发问题仅记录于当期 `TASK.md` 随任务自然消亡；重大架构暗坑须遵循“提议制”，由人类显式确认后方可沉淀。

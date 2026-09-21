@@ -31,12 +31,14 @@
 | 命令 / 模块 | 核心功能 | 解决痛点 | 运作机制 |
 | :--- | :--- | :--- | :--- |
 | **`agate init`** | 一键工程护栏挂载 | 消除配置分裂，规范项目基线 | 自动分发核心规约至各 Agent，初始化双地图骨架（`MAP.md` + `contexts/context.md`），挂载防爆仓索引与本地 Git 双重门禁。 |
-| **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 16 项 AI 缓存、草稿与私有配置（包含 `.env*`），不修改公共 `.gitignore`，团队零感知。 |
+| **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 17 项 AI 缓存、草稿与私有配置（包含 `.env*` 与 `*.agate.bak`），不修改公共 `.gitignore`，团队零感知。 |
 | **`agate verify`** | 闭环自检物证交付 | 杜绝伪交付与无效死循环试错 | **阶段 0** 静态扫描（拦截密钥、大文件、未完工占位符等 7 大红线，支持 `--staged` 暂存区定向审查）+ **阶段 1** 优先调度自检脚本或测试套件，输出绿色 `[PASS]` 物证，连续失败触发**两振硬熔断**。 |
 | **`agate task`** | 跨 Agent 任务接力 | 跨工具任务脱节、上下文丢失与冲突 | 提供 `status/claim/handover/resume/done` 全流程状态机驱动，支持多 Agent 租约互斥锁、接力四要素结构化传承与交接流转审计时间线。 |
 | **`agate export / view`** | HTML 审查物证报告 | 异步代码复盘与人类直观核验 | 将任务看板、Git Diff 对比、安全审计与测试物证一键编译为零网络外链依赖的自包含单文件 HTML 凭单，支持系统默认浏览器秒级预览。 |
 | **`agate scan`** | 智能拓扑嗅探推导 | 自动化补齐项目架构全景 | 智能分析工程构建文件（Maven / npm / Go / Python 等）与核心端口拓扑，支持 `--write` 确定性排序稳定回填双地图。 |
 | **`agate hook`** | Git 双重物理门禁 | 拦截未验证代码与越权外溢 | 挂载本地 `pre-commit`（暂存区定向自检）与 `pre-push`（白名单授权物理防偷跑），支持 `status` 门禁状态看板。 |
+| **`agate ci`** | 远程 CI/CD 自动化门禁 | 杜绝不合格半成品与风险入库 | `agate ci verify` 固定启用严格模式与自包含 HTML 审查物证报告生成，原生适配 GitHub Actions 与 GitLab CI 流水线。 |
+| **策略配置** | 项目级声明式规则底座 | 消除配置离散与团队规则漂移 | 识别根目录 `.agate/config.toml`，支持团队统一固化 Agent 规约目标、严格测试开关与 Hook 安装策略，支持命令行动态覆盖。 |
 
 ---
 
@@ -155,11 +157,12 @@ install = true
 agate verify
 
 # 进阶模式：
-agate verify --staged       # 仅定向审查 Git 暂存区待提交文件（pre-commit 自动调用，毫秒级快速就绪）
+agate verify --staged       # 仅定向审查 Git 暂存区待提交文件（空暂存区快速返回；有暂存变更时执行完整定向审查）
 agate verify --strict       # 严格模式：未检测到自检脚本或测试套件时强制阻断交付
 agate verify --skip-guard   # 应急逃生模式：跳过 Phase 0 安全扫描，仅运行测试脚本
 ```
 自检通过将输出 `[PASS]` 结果；如连续两次失败，AI 必须停手熔断交还主控权。
+在人工确认已修复后，使用 `agate verify --resume-after-break` 解除熔断并重新验证。
 
 #### CI 与远程合并门禁
 
@@ -286,7 +289,7 @@ graph TD
 - **隐形隔离**：AI 私有配置全量注册于本地 `.git/info/exclude`，与团队 `.gitignore` 解耦，互不干扰；
 - **显式授权公理 (Explicit Mandate Principle)**：Git 提交推送、Release 发布、环境推流等具外溢效应的动作默认物理死锁，除非用户指令中出现明确指向动词（如“提交代码”、“发布 Release”），严禁 AI 擅作主张私自外溢；
 - **双物理卡口守底线**：
-  - `pre-commit` 门禁自动对暂存区待提交文件调用 `agate verify --staged`，实现毫秒级快速就绪与红线拦截；
+  - `pre-commit` 门禁自动对暂存区待提交文件调用 `agate verify --staged`；空暂存区快速返回，有暂存变更时执行完整定向审查与红线拦截；
   - `pre-push` 门禁严格识别终端环境；在非交互式/自动化脚本环境下，唯有用户显式授权且声明 `ALLOW_AUTOMATED_PUSH=1`（或 `true`）时才放行，否则强制阻断偷跑。
 
 ---

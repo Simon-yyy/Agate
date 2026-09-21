@@ -43,6 +43,20 @@ type TaskStatusResult struct {
 	RecentTimeline []string
 }
 
+func ensureLockOwner(root, agent string, force bool) error {
+	lock, err := ReadLock(root)
+	if err != nil {
+		return err
+	}
+	if lock == nil {
+		return fmt.Errorf("当前任务未被认领，禁止执行状态流转")
+	}
+	if lock.OwnerAgent != agent && !force && !lock.IsExpired() {
+		return fmt.Errorf("无权操作由 [%s] 持有的任务锁 (请使用 --force 强制操作)", lock.OwnerAgent)
+	}
+	return nil
+}
+
 // DetectCurrentAgent 智能嗅探当前执行环境对应的 Agent 名称
 func DetectCurrentAgent(rootDir string) string {
 	if rootDir == "" {
@@ -108,6 +122,9 @@ func ClaimTask(rootDir string, agent string, force bool) (*TaskManifest, *TaskLo
 	if err != nil {
 		return nil, nil, err
 	}
+	if manifest.Status == StatusDone {
+		return nil, nil, fmt.Errorf("任务 [%s] 已处于 DONE 终态，禁止重新认领", manifest.TaskId)
+	}
 
 	// 若当前处于 HANDOVER_READY 状态，接棒者可以正常接单（强制放行抢锁）
 	allowSteal := force || manifest.Status == StatusHandoverReady
@@ -146,6 +163,9 @@ func HandoverTask(opts HandoverOptions) (*TaskManifest, string, error) {
 	currentAgent := opts.CurrentAgent
 	if currentAgent == "" {
 		currentAgent = DetectCurrentAgent(root)
+	}
+	if err := ensureLockOwner(root, currentAgent, opts.Force); err != nil {
+		return nil, "", err
 	}
 
 	// 1. 验证门禁拦截
@@ -202,7 +222,9 @@ func HandoverTask(opts HandoverOptions) (*TaskManifest, string, error) {
 	}
 
 	// 4. 释放锁
-	_ = ReleaseLock(root, currentAgent, opts.Force)
+	if err := ReleaseLock(root, currentAgent, opts.Force); err != nil {
+		return nil, "", fmt.Errorf("交接状态已保存，但释放任务锁失败: %w", err)
+	}
 
 	return manifest, outPath, nil
 }
@@ -227,6 +249,9 @@ func DoneTask(opts HandoverOptions) (*TaskManifest, string, error) {
 	currentAgent := opts.CurrentAgent
 	if currentAgent == "" {
 		currentAgent = DetectCurrentAgent(root)
+	}
+	if err := ensureLockOwner(root, currentAgent, opts.Force); err != nil {
+		return nil, "", err
 	}
 
 	// 1. 验证门禁拦截
@@ -281,7 +306,9 @@ func DoneTask(opts HandoverOptions) (*TaskManifest, string, error) {
 	}
 
 	// 4. 彻底释放锁
-	_ = ReleaseLock(root, currentAgent, true)
+	if err := ReleaseLock(root, currentAgent, opts.Force); err != nil {
+		return nil, "", fmt.Errorf("任务归档状态已保存，但释放任务锁失败: %w", err)
+	}
 
 	return manifest, outPath, nil
 }

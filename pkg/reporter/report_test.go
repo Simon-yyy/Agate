@@ -163,3 +163,18 @@ func TestBuildReportAndFindLatest(t *testing.T) {
 		t.Errorf("FindLatestReport 预期为 %s，实际得到 %s", outPath, latestPath)
 	}
 }
+
+func TestBuildReportUsesUniqueDefaultNames(t *testing.T) {
+	root := t.TempDir()
+	first, _, err := BuildReport(ReportOptions{RootDir: root, TestPassed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := BuildReport(ReportOptions{RootDir: root, TestPassed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("连续生成报告不得复用同一文件名: %s", first)
+	}
+}

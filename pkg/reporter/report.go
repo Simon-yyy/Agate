@@ -182,7 +182,7 @@ func BuildReport(opts ReportOptions) (string, *ReportData, error) {
 		if err := os.MkdirAll(reviewsDir, 0755); err != nil {
 			return "", nil, fmt.Errorf("创建审查报告目录失败 [%s]: %w", reviewsDir, err)
 		}
-		timestamp := time.Now().Format("20060102-150405")
+		timestamp := time.Now().Format("20060102-150405.000000000")
 		outPath = filepath.Join(reviewsDir, fmt.Sprintf("review-%s.html", timestamp))
 	} else {
 		if dir := filepath.Dir(outPath); dir != "." && dir != "" {

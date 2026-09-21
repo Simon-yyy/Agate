@@ -55,7 +55,9 @@
 - **`pkg/relay`**：跨 Agent 任务接力与状态机中枢，管理双模 TASK.md、租约互斥锁与接力四要素；
 - **`pkg/reporter`**：自包含单文件 HTML 审查报告引擎，汇聚安全审计、Diff 对比、任务看板与物证日志，支持跨平台浏览器自动弹出；
 - **`pkg/harness`**：地图骨架生成器、跨平台文件操作、软链回退与真原子写入机制；
-- **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行。
+- **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行；
+- **`pkg/agent`**：多 Agent 环境感知与智能体指纹识别注册中心（Codex, Cursor, Antigravity, Claude, Windsurf）；
+- **`pkg/config`**：项目级策略配置中心（`.agate/config.toml`），管理团队级 Agent 目标列表、严格测试模式与命令参数覆盖策略。
 
 ### 2.3 底层 Git 与执行层
 - **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，采用受管标记块（Managed Block）增量注入，避免修改团队共用的 `.gitignore`；

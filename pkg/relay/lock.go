@@ -13,6 +13,9 @@ import (
 // DefaultLeaseDuration 默认任务租约超时时间（2 小时防死锁）
 const DefaultLeaseDuration = 2 * time.Hour
 
+const lockTransitionTimeout = 5 * time.Second
+const lockTransitionStaleAfter = 30 * time.Second
+
 // TaskLock 任务互斥软租约锁结构
 type TaskLock struct {
 	TaskId     string    `json:"task_id"`
@@ -32,6 +35,42 @@ func GetLockPath(rootDir string) string {
 		rootDir = "."
 	}
 	return filepath.Join(rootDir, ".ai-memory", "locks", "task.lock")
+}
+
+func getLockTransitionPath(rootDir string) string {
+	return GetLockPath(rootDir) + ".transition"
+}
+
+// acquireLockTransitionGuard 在检查与写入任务锁之间建立跨进程互斥，避免多个 Agent 同时读到“无锁”后都写入成功。
+func acquireLockTransitionGuard(rootDir string) (func(), error) {
+	guardPath := getLockTransitionPath(rootDir)
+	if err := os.MkdirAll(filepath.Dir(guardPath), 0755); err != nil {
+		return nil, fmt.Errorf("创建任务锁目录失败: %w", err)
+	}
+
+	deadline := time.Now().Add(lockTransitionTimeout)
+	for {
+		guard, err := os.OpenFile(guardPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			if closeErr := guard.Close(); closeErr != nil {
+				_ = os.Remove(guardPath)
+				return nil, fmt.Errorf("关闭任务锁过渡文件失败: %w", closeErr)
+			}
+			return func() { _ = os.Remove(guardPath) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("创建任务锁过渡文件失败: %w", err)
+		}
+
+		if info, statErr := os.Stat(guardPath); statErr == nil && time.Since(info.ModTime()) > lockTransitionStaleAfter {
+			_ = os.Remove(guardPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("等待任务锁过渡互斥超时，请稍后重试")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // ReadLock 读取当前存在的锁信息
@@ -59,6 +98,11 @@ func AcquireLock(rootDir string, taskId, agent string, lease time.Duration, forc
 	if lease == 0 {
 		lease = DefaultLeaseDuration
 	}
+	releaseGuard, err := acquireLockTransitionGuard(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseGuard()
 
 	currentLock, err := ReadLock(rootDir)
 	if err != nil {

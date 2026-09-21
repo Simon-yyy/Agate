@@ -65,7 +65,7 @@ func TestApplyPrivateExclusions(t *testing.T) {
 		}
 	}
 
-	// 第三次测试传入 nil 时的默认清单，必须包含 .env 与 .env.local
+	// 第三次测试传入 nil 时的默认清单，必须包含 .env 与 Agate 规则备份文件。
 	defaultCount, err := ApplyPrivateExclusions(nil)
 	if err != nil {
 		t.Fatalf("写入默认排除清单失败: %v", err)
@@ -74,8 +74,8 @@ func TestApplyPrivateExclusions(t *testing.T) {
 		t.Errorf("默认排除清单写入项预期大于 0")
 	}
 	content, _ = os.ReadFile(excludeFile)
-	if !strings.Contains(string(content), ".env") || !strings.Contains(string(content), ".env.local") {
-		t.Errorf("默认排除清单中缺少 .env 或 .env.local，存在安全策略断裂风险！内容:\n%s", string(content))
+	if !strings.Contains(string(content), ".env") || !strings.Contains(string(content), ".env.local") || !strings.Contains(string(content), "*.agate.bak") {
+		t.Errorf("默认排除清单中缺少 .env、.env.local 或 *.agate.bak，存在安全策略断裂风险！内容:\n%s", string(content))
 	}
 }
 

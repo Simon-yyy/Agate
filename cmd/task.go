@@ -20,6 +20,15 @@ var (
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "跨 Agent 协同任务接力与状态机管理",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		return &UsageError{Err: fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())}
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 	Long: `跨编程工具 (Cursor, Antigravity, Claude Code, Windsurf) 任务接力中枢。
 负责管理 TASK.md 状态机流转、多 Agent 租约互斥锁、自检门禁核验与机器交付物证留痕。`,
 }

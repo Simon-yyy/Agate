@@ -218,7 +218,7 @@ func RunPreflightAudit(root string) *AuditResult {
 	// 6. 检查 vendor 目录纯净度
 	auditVendorCleanliness(root, res)
 
-// 7. 检查 3-Hop 双地图完备性 (MAP.md 与 contexts/context.md 架构契约)
+	// 7. 检查 3-Hop 双地图完备性 (MAP.md 与 contexts/context.md 架构契约)
 	auditArchitectureMaps(root, res)
 
 	// 若当前目录非 Git 仓库，不存在版本库提交风险，将依赖 Git 隔离机制的违规降级为 WARN（平滑降级原则）
@@ -426,12 +426,15 @@ var (
 
 // findHardcodedMachinePath 匹配代码行中的个人机器绝对路径，并自动排除合法的标准系统资源路径
 func findHardcodedMachinePath(line string) string {
+	// 源码字符串中的 Windows 路径常以 C:\\Users\\name 形式出现；先还原转义分隔符，
+	// 再复用同一套路径规则，避免审计因字面量转义而漏检。
+	normalizedLine := strings.ReplaceAll(line, `\\`, `\`)
 	// 1. 匹配 Windows 盘符型机器路径
-	if m := winMachinePathRegex.FindString(line); m != "" {
+	if m := winMachinePathRegex.FindString(normalizedLine); m != "" {
 		return m
 	}
 	// 2. 匹配 Unix / macOS 个人主目录型路径 (如 /home/user/... 或 /Users/user/...)
-	if m := unixUserPathRegex.FindString(line); m != "" {
+	if m := unixUserPathRegex.FindString(normalizedLine); m != "" {
 		if !isWhitelistedSystemPath(m) {
 			return m
 		}

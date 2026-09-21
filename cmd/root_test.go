@@ -41,7 +41,15 @@ func TestExecuteWithArgsTriStateExitCodes(t *testing.T) {
 		t.Errorf("错误输出未包含用法错误提示: %s", errBuf.String())
 	}
 
-	// 4. 业务/门禁失败 (Exit Code 1)
+	// 4. 父命令的未知子命令同样必须视为用法错误，不能静默展示帮助并返回成功。
+	outBuf.Reset()
+	errBuf.Reset()
+	code = ExecuteWithArgs([]string{"ci", "verfy"}, outBuf, errBuf)
+	if code != 2 {
+		t.Fatalf("父命令未知子命令预期退出码为 2，实际得到: %d, err: %s", code, errBuf.String())
+	}
+
+	// 5. 业务/门禁失败 (Exit Code 1)
 	tempDir, err := os.MkdirTemp("", "agate-exit-test-*")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)

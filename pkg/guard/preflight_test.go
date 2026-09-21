@@ -77,6 +77,7 @@ func run() {
 	_ = sock
 	_ = pidFile
 }
+
 `
 	_ = os.WriteFile(cleanCode, []byte(content), 0644)
 
@@ -85,6 +86,13 @@ func run() {
 		if v.Category == "机器绝对路径泄露" {
 			t.Errorf("合法的标准系统路径不应被误判拦截: %s:%d %s", v.File, v.LineNumber, v.Message)
 		}
+	}
+}
+
+func TestFindHardcodedMachinePathRecognizesEscapedWindowsPath(t *testing.T) {
+	path := findHardcodedMachinePath(`const profile = "C:\\Users\\Alice\\project"`)
+	if path == "" {
+		t.Fatal("双反斜杠形式的 Windows 机器路径不得绕过审计")
 	}
 }
 
@@ -627,5 +635,3 @@ func TestGitContextBatchIgnoredPerformance(t *testing.T) {
 		t.Errorf("temp_build/artifact.bin 预期被识别为忽略")
 	}
 }
-
-

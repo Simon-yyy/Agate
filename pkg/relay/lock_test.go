@@ -1,6 +1,8 @@
 package relay
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -70,5 +72,37 @@ func TestExpiredLockAllowsNewClaim(t *testing.T) {
 	}
 	if newLock.OwnerAgent != "new_agent" {
 		t.Errorf("新持锁人应为 new_agent: %s", newLock.OwnerAgent)
+	}
+}
+
+func TestAcquireLockAllowsOnlyOneConcurrentOwner(t *testing.T) {
+	tmpDir := t.TempDir()
+	const contenders = 32
+
+	start := make(chan struct{})
+	results := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			_, err := AcquireLock(tmpDir, "TASK-CONCURRENT", fmt.Sprintf("agent-%d", index), time.Hour, false)
+			results <- err
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("并发认领必须仅有一个成功，实际成功数: %d", successes)
 	}
 }
