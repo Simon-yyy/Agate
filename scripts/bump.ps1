@@ -1,4 +1,4 @@
-# scripts/bump.ps1 - Agate 语义化版本升级与发布脚本 (PowerShell)
+# scripts/bump.ps1 - Agate semantic version bump and release script (PowerShell)
 param(
     [string]$Type = "patch",
     [switch]$Release
@@ -8,20 +8,24 @@ $ErrorActionPreference = "Stop"
 
 $rootFile = "cmd/root.go"
 if (!(Test-Path $rootFile)) {
-    Write-Error "未找到 $rootFile，请在项目根目录下执行"
+    Write-Error "cmd/root.go not found. Please run this script from the project root."
 }
 
-# 1. 提取当前版本号
+# 1. Extract current version
 $currentVersion = "0.1.0"
 $lines = Get-Content -Path $rootFile
 foreach ($line in $lines) {
-    if ($line -match 'version\s*=\s*"([^"]+)"') {
-        $currentVersion = $matches[1]
-        break
+    if ($line.Contains("version = ")) {
+        $start = $line.IndexOf('"') + 1
+        $end = $line.LastIndexOf('"')
+        if ($start -gt 0 -and $end -gt $start) {
+            $currentVersion = $line.Substring($start, $end - $start)
+            break
+        }
     }
 }
 
-# 2. 计算新版本号
+# 2. Calculate target version
 $parts = $currentVersion.Split('.')
 [int]$major = if ($parts.Length -ge 1) { [int]$parts[0] } else { 0 }
 [int]$minor = if ($parts.Length -ge 2) { [int]$parts[1] } else { 0 }
@@ -48,29 +52,34 @@ switch ($Type.ToLower()) {
         if ($cleanVer -match '^\d+\.\d+\.\d+') {
             $newVersion = $cleanVer
         } else {
-            Write-Error "无效的版本升级类型: $Type (支持: patch, minor, major 或指定版本号如 0.2.1)"
+            Write-Error "Invalid bump type: $Type (supported: patch, minor, major or explicit version like 0.2.5)"
         }
     }
 }
 
-Write-Host "=== [Agate 版本升级] ===" -ForegroundColor Cyan
-Write-Host "当前版本: v$currentVersion" -ForegroundColor Gray
-Write-Host "升级目标: v$newVersion" -ForegroundColor Green
+Write-Host "=== [Agate Version Bump] ===" -ForegroundColor Cyan
+Write-Host "Current version: v$currentVersion" -ForegroundColor Gray
+Write-Host "Target version:  v$newVersion" -ForegroundColor Green
 
-# 3. 回填更新 cmd/root.go
-$content = Get-Content -Path $rootFile -Raw
+# 3. Update cmd/root.go
+$resolvedPath = (Resolve-Path $rootFile).Path
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$content = [System.IO.File]::ReadAllText($resolvedPath, [System.Text.Encoding]::UTF8)
 $newContent = $content.Replace("version = `"$currentVersion`"", "version = `"$newVersion`"")
-Set-Content -Path $rootFile -Value $newContent -NoNewline
-Write-Host "[+] 已更新 $rootFile 版本号至 $newVersion" -ForegroundColor Green
+[System.IO.File]::WriteAllText($resolvedPath, $newContent, $utf8NoBom)
+Write-Host "[+] Updated $rootFile to version $newVersion" -ForegroundColor Green
 
-# 4. 执行全平台构建归档
-Write-Host "[+] 正在触发全平台构建与安装包归档..." -ForegroundColor Cyan
+# 4. Trigger cross-platform build and packaging
+Write-Host "[+] Building cross-platform archives..." -ForegroundColor Cyan
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/archive.ps1"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Archive packaging failed with exit code: $LASTEXITCODE"
+}
 
-Write-Host "`n[✓] 本地版本升级与归档完毕: v$newVersion" -ForegroundColor Green
+Write-Host "`n[PASS] Version bump and archive completed: v$newVersion" -ForegroundColor Green
 
 if ($Release) {
-    Write-Host "[+] 正在提交并推送 Release 标签 (v$newVersion)..." -ForegroundColor Cyan
+    Write-Host "[+] Committing and pushing Release tag (v$newVersion)..." -ForegroundColor Cyan
     git add $rootFile scripts/
     git commit -m "chore(release): bump version to v$newVersion"
     git tag -a "v$newVersion" -m "release: v$newVersion"
@@ -78,12 +87,12 @@ if ($Release) {
     git push origin main
     git push origin "v$newVersion"
     Remove-Item Env:\ALLOW_AUTOMATED_PUSH -ErrorAction SilentlyContinue
-    Write-Host "[✓] Release 标签 v$newVersion 已推送，GitHub Actions 已自动触发云端发布！" -ForegroundColor Green
+    Write-Host "[PASS] Release tag v$newVersion pushed successfully!" -ForegroundColor Green
 } else {
-    Write-Host "💡 提示：如需将此版本自动发布至 GitHub Releases，可执行：" -ForegroundColor Yellow
+    Write-Host "[INFO] To publish this release to GitHub Releases, run:" -ForegroundColor Yellow
     Write-Host "   git add cmd/root.go scripts/" -ForegroundColor Gray
-    Write-Host "   git commit -m 'chore(release): bump version to v$newVersion'" -ForegroundColor Gray
-    Write-Host "   git tag -a 'v$newVersion' -m 'release: v$newVersion'" -ForegroundColor Gray
-    Write-Host "   `$env:ALLOW_AUTOMATED_PUSH='1'; git push origin main; git push origin 'v$newVersion'" -ForegroundColor Gray
-    Write-Host "   或下次直接运行: .\scripts\bump.cmd -Release 自动完成全流程发布。" -ForegroundColor Yellow
+    Write-Host "   git commit -m `"chore(release): bump version to v$newVersion`"" -ForegroundColor Gray
+    Write-Host "   git tag -a `"v$newVersion`" -m `"release: v$newVersion`"" -ForegroundColor Gray
+    Write-Host '   $env:ALLOW_AUTOMATED_PUSH=1; git push origin main; git push origin v' -NoNewline -ForegroundColor Gray
+    Write-Host $newVersion -ForegroundColor Gray
 }
