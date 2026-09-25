@@ -4,7 +4,6 @@
 
 <!-- agate:codex-rules:start -->
 ## Agate Codex Guardrails
-
 # 核心协同与安全规范 (Agate / Agent Gate)
 
 ## 1. 中文原生与代码完整性

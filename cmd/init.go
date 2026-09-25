@@ -99,6 +99,11 @@ var initCmd = &cobra.Command{
 			fmt.Printf("  \033[93m[!] 发现全局规约文件 [%s] 但读取失败: %v，已平滑降级使用内置标准规约\033[0m\n", sourcePath, err)
 		} else if sourcePath != "" {
 			fmt.Printf("  \033[92m[+] 已加载全局统一规约 -> %s\033[0m\n", sourcePath)
+			if warnings := adapter.CheckDeprecatedRulePatterns(globalRules); len(warnings) > 0 {
+				for _, w := range warnings {
+					fmt.Printf("  \033[93m[!] 警告: 全局规约检测到陈旧过时表述 (%s)，建议同步更新为最新 MAP.md 体系\033[0m\n", w)
+				}
+			}
 		} else {
 			fmt.Println("  \033[90m[i] 未检测到全局定制规约，采用内置标准协同规约\033[0m")
 		}

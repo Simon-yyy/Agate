@@ -235,3 +235,20 @@ func TestLoadGlobalRules(t *testing.T) {
 		t.Errorf("规约内容预期 %s，实际 %s", testRuleContent, string(content))
 	}
 }
+
+func TestCheckDeprecatedRulePatterns(t *testing.T) {
+	// 1. 干净规则无警告
+	clean := []byte("# 核心协同与安全规范 (Agate / Agent Gate)\n- 寻路顺序严格遵循：MAP.md -> contexts/context.md")
+	warnings := CheckDeprecatedRulePatterns(clean)
+	if len(warnings) != 0 {
+		t.Errorf("干净规约预期 0 警告，实际得到: %v", warnings)
+	}
+
+	// 2. 命中旧品牌与旧寻路
+	dirty := []byte("# 核心协同与安全规范 (ai-dev-harness)\n- 寻路顺序严格遵循：AGENTS.md (架构地图) -> contexts/context.md")
+	warnings = CheckDeprecatedRulePatterns(dirty)
+	if len(warnings) != 2 {
+		t.Errorf("陈旧规约预期 2 条警告，实际得到 %d 条: %v", len(warnings), warnings)
+	}
+}
+

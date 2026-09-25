@@ -251,3 +251,17 @@ func loadGlobalRulesFrom(homeDir string) ([]byte, string, error) {
 	}
 	return nil, "", nil
 }
+
+// CheckDeprecatedRulePatterns 检查规约内容中是否残留了老版本废弃标识
+func CheckDeprecatedRulePatterns(content []byte) []string {
+	var warnings []string
+	text := string(content)
+	if strings.Contains(text, "ai-dev-harness") {
+		warnings = append(warnings, "包含旧品牌命名 'ai-dev-harness'")
+	}
+	if strings.Contains(text, "AGENTS.md (架构地图)") || strings.Contains(text, "AGENTS.md 与 context.md") {
+		warnings = append(warnings, "寻路规约仍指向旧版 'AGENTS.md' 架构地图而非 'MAP.md'")
+	}
+	return warnings
+}
+
