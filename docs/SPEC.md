@@ -107,6 +107,15 @@ install = true
 
 ---
 
+### 4.2 未预置第三方 Agent 接入约定
+
+Agate 采用“**双地图为规范本体，主流预置分发，物理门禁透明兜底**”的开闭原则（Open-Closed Principle）：
+1. **解耦原则**：工程认知本体沉淀于根目录公共文件（`MAP.md` 与 `contexts/context.md`），而非强绑定在某一商业 IDE 格式；
+2. **长尾软件接入契约**：对于 GitHub Copilot、Cline、Trae、Continue、Aider 等未预置目标，开发者无需等待 CLI 支持，可通过软链既有 `.cursorrules`、在专有 instructions 文件中引用 `contexts/context.md`，或首轮对话输入寻路指令即可获得完整约束；
+3. **安全底座零死角**：`.git/info/exclude` 隐形忽略、`pre-commit` 暂存区审计与 `pre-push` 物理防偷跑钩子在操作系统与 Git 进程级透明运行，任何非预置 Agent 或第三方编辑器均无权绕过。
+
+---
+
 ## 五、 架构地图骨架标准 (MAP.md & contexts/context.md)
 
 ### 5.1 MAP.md 规范骨架

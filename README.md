@@ -123,30 +123,67 @@ agate init -t all             # 全量挂载所有支持的 Agent 工具
 === [完成] 工程护栏全量挂载完毕 ===
 ```
 
+### 1.1 第三方与未预置软件适配（GitHub Copilot / Cline / Trae / Continue 等）
+
+如果团队或开发者使用的是除预置目标（Cursor、Antigravity、Claude、Codex、Windsurf）之外的其他 AI 编程工具，Agate 的安全防护体系依然完全生效。推荐以下三种简易接入姿势：
+
+1. **规则文件复用与软链（推荐）**：
+   大部分现代 AI 工具均支持指定或读取自定义规则文件，只需将该工具的规则文件软链或指向现有规约：
+   - **Cline / Roo Code**：直接将 `.clinerules` 软链至 `.cursorrules`，或在 `.clinerules` 首行声明：`参考 .cursorrules 核心规约`；
+   - **GitHub Copilot**：创建 `.github/copilot-instructions.md`，内容仅需一行：`所有交互必须遵循 MAP.md 架构空间地图与 contexts/context.md 技术契约。`；
+   - **Trae / Continue / Aider**：在对应的规则配置文件中直接引入 `contexts/context.md`。
+2. **对话级首句激活（通用零配置）**：
+   针对任何没有规则配置文件的轻量级或外挂 AI 工具，在首轮对话直接发送以下指令即可激活同等架构约束：
+   > *“请先阅读 MAP.md 与 contexts/context.md。动代码前必须先出方案（Two-Phase Gate），交付前必须跑通本地自检。”*
+3. **物理安全底座保障（免配置，100% 自动生效）**：
+   无论使用任何第三方软件（甚至是记事本手工编辑）：
+   - **Git 隐形隔离**：AI 私有缓存依然被本地 `.git/info/exclude` 屏蔽，绝不污染仓库；
+   - **Pre-commit 拦截**：代码提交时，本地物理门禁强制执行 `agate verify`（拦截密钥、大文件与占位符）；
+   - **Pre-push 物理阻断**：AI 依然无法私自触发 `git push`，提交权 100% 锁死在人类手中。
+
 ### 2. 冷启动快速注入架构认知
 
 挂载完成后，可在与 AI 的首轮对话中发送以下提示词，指导 AI 自动完善架构地图：
 > *“阅读 MAP.md 与 contexts/context.md 骨架，结合当前代码目录，简要补齐各模块核心职责与关键入口。”*
 
-### 2.1 项目级配置
+### 2.1 项目级持久化配置（.agate/config.toml）
 
-可在项目根目录创建 `.agate/config.toml`，让项目覆盖默认 Agent、严格验证和 Hook 策略：
+如果项目有多位成员协作，或者项目固定需要适配特定的一组 Agent 工具（例如 Cursor 与 Codex），可在项目根目录创建 `.agate/config.toml`，将防护策略沉淀为项目共享资产：
 
-```toml
-[agent]
-targets = ["codex", "cursor"]
-
-[guard]
-strict = true
-todo = "warning"        # 占位配置：读取并提示，当前不改变审计行为
-absolute_path = "error" # 占位配置：读取并提示，当前不改变审计行为
-large_file_mb = 20      # 占位配置：读取并提示，当前不改变审计行为
-
-[hooks]
-install = true
+```text
+my-project/
+├── .agate/
+│   └── config.toml    <--- 项目级持久化配置文件（建议提交进 Git 团队共享）
+├── MAP.md
+├── contexts/
+│   └── context.md
+└── ...
 ```
 
-配置优先级为：命令行参数 > 项目配置 > 当前 Agent 自动识别 > 项目已有配置 > 内置默认值。配置文件不存在时，Agate 保持默认行为；不支持的格式或字段会直接报错，避免静默失效。
+#### 配置内容范例：
+```toml
+# 1. 锁定该项目默认分发的 Agent 规约
+[agent]
+# 团队成员拉取代码后直接执行 `agate init`，无需追加 -t 参数，自动对齐这组工具
+targets = ["codex", "cursor"]
+
+# 2. 审计严格度与红线策略
+[guard]
+strict = true              # 是否启用严格验证模式
+large_file_mb = 20         # 拦截超过 20MB 的未忽略大文件
+todo = "warning"           # 未完工 TODO 占位符按警告提示（当前为预留占位配置）
+absolute_path = "error"    # 发现硬编码绝对路径强行阻断（当前为预留占位配置）
+
+# 3. 门禁安装策略
+[hooks]
+install = true             # 执行 init 时默认自动安装 Git pre-commit 与 pre-push 门禁
+```
+
+#### 核心价值与优先级：
+- **团队零心智对齐**：将 `.agate/config.toml` 提交至 Git 仓库，团队新成员克隆代码后只需直接执行 `agate init`，即可自动分发所有预定规约并挂载门禁；
+- **配置覆盖优先级**：
+  $$\text{命令行参数（如 -t claude）} > \mathbf{.agate/config.toml}\text{（项目级配置）} > \text{当前 Agent 自动识别} > \text{内置默认值}$$
+  配置文件不存在时，Agate 保持默认行为；若存在未知字段或语法错误会立即拦截报错，避免策略静默失效。
 
 ### 3. 闭环自检与交付验证
 
