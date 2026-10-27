@@ -16,8 +16,8 @@ type TemplateContext struct {
 
 // EnsureIgnore 生成防爆仓检索过滤文件 .ignore
 func EnsureIgnore() (bool, error) {
-	if _, err := os.Stat(".ignore"); err == nil {
-		return false, nil // 已存在，不覆盖
+	if _, err := os.Lstat(".ignore"); err == nil || !os.IsNotExist(err) {
+		return false, err // 已存在或非不存在错误，不覆盖
 	}
 
 	err := WriteFileAtomic(".ignore", templates.DefaultIgnore, 0644)
@@ -29,8 +29,8 @@ func EnsureIgnore() (bool, error) {
 
 // EnsureMap 生成项目架构地图骨架 MAP.md。
 func EnsureMap(projectName string) (bool, error) {
-	if _, err := os.Stat("MAP.md"); err == nil {
-		return false, nil // 已存在
+	if _, err := os.Lstat("MAP.md"); err == nil || !os.IsNotExist(err) {
+		return false, err // 已存在或非不存在错误
 	}
 
 	tmpl, err := template.New("agents").Parse(string(templates.DefaultAgentsTpl))
@@ -55,8 +55,8 @@ func EnsureAgentsMap(projectName string) (bool, error) { return EnsureMap(projec
 // EnsureContext 生成工程技术上下文基线 contexts/context.md
 func EnsureContext() (bool, error) {
 	target := filepath.Join("contexts", "context.md")
-	if _, err := os.Stat(target); err == nil {
-		return false, nil
+	if _, err := os.Lstat(target); err == nil || !os.IsNotExist(err) {
+		return false, err
 	}
 
 	if err := WriteFileAtomic(target, templates.DefaultContextTpl, 0644); err != nil {
@@ -67,8 +67,8 @@ func EnsureContext() (bool, error) {
 
 // EnsureTaskBoard 生成协同任务看板 TASK.md
 func EnsureTaskBoard() (bool, error) {
-	if _, err := os.Stat("TASK.md"); err == nil {
-		return false, nil // 已存在
+	if _, err := os.Lstat("TASK.md"); err == nil || !os.IsNotExist(err) {
+		return false, err // 已存在或非不存在错误
 	}
 
 	if err := WriteFileAtomic("TASK.md", templates.DefaultTaskTpl, 0644); err != nil {
@@ -79,8 +79,8 @@ func EnsureTaskBoard() (bool, error) {
 
 // EnsureMemory 生成跨会话协同记忆 MEMORY.md
 func EnsureMemory() (bool, error) {
-	if _, err := os.Stat("MEMORY.md"); err == nil {
-		return false, nil // 已存在
+	if _, err := os.Lstat("MEMORY.md"); err == nil || !os.IsNotExist(err) {
+		return false, err // 已存在或非不存在错误
 	}
 
 	if err := WriteFileAtomic("MEMORY.md", templates.DefaultMemoryTpl, 0644); err != nil {

@@ -178,3 +178,79 @@ func TestBuildReportUsesUniqueDefaultNames(t *testing.T) {
 		t.Fatalf("连续生成报告不得复用同一文件名: %s", first)
 	}
 }
+
+func TestRenderHTMLNilAuditResultAndLineZeroAndTestBadges(t *testing.T) {
+	// 1. AuditResult == nil 且未执行测试
+	html, err := RenderHTML(&ReportData{
+		ProjectName: "nil-audit-demo",
+		Status:      "PASS",
+		TestPassed:  false,
+		TestOutput:  "",
+	})
+	if err != nil {
+		t.Fatalf("RenderHTML(AuditResult=nil) 失败: %v", err)
+	}
+	if !strings.Contains(html, "⚪ 未执行动态测试") {
+		t.Errorf("未执行动态测试时预期显示 '⚪ 未执行动态测试'，实际未匹配")
+	}
+
+	// 2. LineNumber == 0 时不应渲染 ":0"，且 TestExecuted=true, TestPassed=false 显示 ❌ 测试未通过
+	html2, err := RenderHTML(&ReportData{
+		ProjectName:  "line-zero-demo",
+		Status:       "FAIL",
+		TestPassed:   false,
+		TestExecuted: true,
+		AuditResult: &guard.AuditResult{
+			Violations: []guard.Violation{
+				{
+					Level:      "ERROR",
+					Category:   "私有文件泄露",
+					File:       ".env",
+					LineNumber: 0,
+					Message:    "检测到未隔离的 .env",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderHTML(LineNumber=0) 失败: %v", err)
+	}
+	if strings.Contains(html2, ".env:0") {
+		t.Errorf("LineNumber 为 0 时不应渲染 '.env:0'")
+	}
+	if !strings.Contains(html2, "❌ 测试未通过") {
+		t.Errorf("测试失败时预期显示 '❌ 测试未通过'")
+	}
+}
+
+func TestBuildReportTestExecutedFailedAndFindLatestSubdir(t *testing.T) {
+	tempDir := t.TempDir()
+	cmdInit := exec.Command("git", "init")
+	cmdInit.Dir = tempDir
+	if err := cmdInit.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	outPath, data, err := BuildReport(ReportOptions{
+		RootDir:      tempDir,
+		AuditResult:  &guard.AuditResult{},
+		TestExecuted: true,
+		TestPassed:   false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReport 失败: %v", err)
+	}
+	if data.Status != "FAIL" {
+		t.Errorf("TestExecuted=true 且 TestPassed=false 时预期 Status=FAIL，实际为 %s", data.Status)
+	}
+
+	subDir := filepath.Join(tempDir, "pkg", "sub")
+	_ = os.MkdirAll(subDir, 0755)
+	latestFromSub, err := FindLatestReport(subDir)
+	if err != nil {
+		t.Fatalf("从子目录调用 FindLatestReport 失败: %v", err)
+	}
+	if latestFromSub != outPath {
+		t.Errorf("从子目录 FindLatestReport 预期 %s，实际 %s", outPath, latestFromSub)
+	}
+}

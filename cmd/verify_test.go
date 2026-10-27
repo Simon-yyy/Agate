@@ -400,6 +400,24 @@ func TestVerifyTwoStrikeCircuitBreaker(t *testing.T) {
 		t.Fatal("两振熔断后未显式恢复必须拒绝第三次执行")
 	}
 
+	// Strike 4: 传入 --resume-after-break 但脚本仍未修复（自检再次失败）时，熔断锁死状态不得被解除！
+	buf.Reset()
+	rootCmd.SetArgs([]string{"verify", "--resume-after-break"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("脚本仍失败时 --resume-after-break 应当返回自检失败错误")
+	}
+	flagResumeAfterBreak = false
+	if f := verifyCmd.Flags().Lookup("resume-after-break"); f != nil {
+		f.Changed = false
+	}
+
+	// 紧接着不带 --resume-after-break 再次调用，必须依然处于两振熔断阻断状态
+	buf.Reset()
+	rootCmd.SetArgs([]string{"verify"})
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "两振熔断已开启") {
+		t.Fatalf("恢复自检再次失败后，后续不带 --resume-after-break 必须仍处于熔断阻断状态，实际: %v", err)
+	}
+
 	// 修复脚本，变为通过
 	if runtime.GOOS == "windows" {
 		if err := os.WriteFile(verifyScript, []byte("@echo off\r\nexit /b 0\r\n"), 0755); err != nil {
@@ -429,10 +447,10 @@ func TestTailLines(t *testing.T) {
 	if got := tailLines(inputShort, 5); got != inputShort {
 		t.Errorf("短文本不应截断，期望: %q, 实际: %q", inputShort, got)
 	}
-	inputLong := "1\n2\n3\n4\n5"
+	inputLong := "1\r\n2\r\n3\r\n4\r\n5\r\n"
 	got := tailLines(inputLong, 2)
-	if !strings.Contains(got, "前 3 行已截断") || !strings.Contains(got, "4\n5") {
-		t.Errorf("长文本截断异常: %s", got)
+	if !strings.Contains(got, "前 3 行已截断") || !strings.Contains(got, "4\n5") || strings.Contains(got, "\r") {
+		t.Errorf("长文本截断或 CRLF 清理异常: %q", got)
 	}
 }
 

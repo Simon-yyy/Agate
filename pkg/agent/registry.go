@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Kind 标识当前协同工具类型。
 type Kind string
@@ -54,14 +57,40 @@ func All() []Kind {
 // DetectEnvironment 根据环境变量和终端标识检测当前 Agent。
 // getenv 作为依赖注入，使调用方和测试都不需要修改进程环境。
 func DetectEnvironment(getenv func(string) string, termProgram string, gitIPC string) (Kind, bool) {
-	termProgram = strings.ToLower(termProgram)
-	gitIPC = strings.ToLower(gitIPC)
+	return DetectEnvironmentWithProfiles(getenv, termProgram, gitIPC, nil)
+}
+
+// DetectEnvironmentWithProfiles 根据内置指纹与自定义档案声明的 EnvKeys/TermPrograms 检测当前 Agent。
+func DetectEnvironmentWithProfiles(getenv func(string) string, termProgram string, gitIPC string, custom map[string]Profile) (Kind, bool) {
+	var customNames []string
+	if len(custom) > 0 {
+		customNames = make([]string, 0, len(custom))
+		for name := range custom {
+			customNames = append(customNames, name)
+		}
+		sort.Strings(customNames)
+	}
+
+	// 第一遍：先扫描所有内置 specs 的 envKeys，再扫描自定义档案的 EnvKeys（进程级强指纹）
 	for _, item := range specs {
 		for _, key := range item.envKeys {
 			if getenv(key) != "" {
 				return item.kind, true
 			}
 		}
+	}
+	for _, name := range customNames {
+		for _, key := range custom[name].EnvKeys {
+			if key != "" && getenv(key) != "" {
+				return Kind(name), true
+			}
+		}
+	}
+
+	// 第二遍：再扫描内置 specs 的 termPrograms 与 gitIPC，以及自定义档案的 TermPrograms（宿主终端弱指纹）
+	termProgram = strings.ToLower(termProgram)
+	gitIPC = strings.ToLower(gitIPC)
+	for _, item := range specs {
 		for _, marker := range item.termPrograms {
 			if strings.Contains(termProgram, marker) {
 				return item.kind, true
@@ -73,17 +102,37 @@ func DetectEnvironment(getenv func(string) string, termProgram string, gitIPC st
 			}
 		}
 	}
+	for _, name := range customNames {
+		for _, marker := range custom[name].TermPrograms {
+			markerLower := strings.ToLower(strings.TrimSpace(marker))
+			if markerLower != "" && strings.Contains(termProgram, markerLower) {
+				return Kind(name), true
+			}
+		}
+	}
 	return "", false
 }
 
 // IsAutomationEnvironment 判断当前进程是否带有自动化 Agent/CI 指纹。
 func IsAutomationEnvironment(getenv func(string) string) bool {
+	return IsAutomationEnvironmentWithProfiles(getenv, nil)
+}
+
+// IsAutomationEnvironmentWithProfiles 判断当前进程是否带有内置或自定义自动化 Agent/CI 指纹。
+func IsAutomationEnvironmentWithProfiles(getenv func(string) string, custom map[string]Profile) bool {
 	if getenv("CI") != "" || getenv("GITHUB_ACTIONS") != "" {
 		return true
 	}
 	for _, item := range specs {
 		for _, key := range item.envKeys {
 			if getenv(key) != "" {
+				return true
+			}
+		}
+	}
+	for _, profile := range custom {
+		for _, key := range profile.EnvKeys {
+			if key != "" && getenv(key) != "" {
 				return true
 			}
 		}

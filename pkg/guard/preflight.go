@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"agate/pkg/config"
 )
 
 const maxScanTokenSize = 10 * 1024 * 1024 // 支持最大 10MB 单行源码扫描，防止超长行静默截断
@@ -146,10 +148,23 @@ func newGitContext(root string) *gitContext {
 			if line != "" {
 				slash := filepath.ToSlash(line)
 				ctx.ignoredCache[slash] = true
-				// 记录其所有上级目录为已忽略目录
-				parts := strings.Split(slash, "/")
-				for i := 1; i < len(parts); i++ {
-					ctx.ignoredDirs[strings.Join(parts[:i], "/")] = true
+			}
+		}
+	}
+
+	// 3. 仅将被显式整体忽略的目录（以 / 结尾）加入 ignoredDirs，防止同目录下存在单个被忽略文件时误判整个父目录已忽略
+	ignoredDirCmd := exec.Command("git", "-c", "core.quotepath=false", "ls-files", "--others", "-i", "--exclude-standard", "--directory")
+	ignoredDirCmd.Dir = root
+	if out, err := ignoredDirCmd.Output(); err == nil {
+		scanner := newSafeScanner(strings.NewReader(string(out)))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				slash := filepath.ToSlash(line)
+				if strings.HasSuffix(slash, "/") {
+					if dir := strings.TrimSuffix(slash, "/"); dir != "" {
+						ctx.ignoredDirs[dir] = true
+					}
 				}
 			}
 		}
@@ -195,25 +210,57 @@ func (c *gitContext) isIgnored(slashPath string) bool {
 	return ignored
 }
 
+func resolveGuardPolicies(root string) (int64, string, string) {
+	maxFileSizeBytes := int64(5 * 1024 * 1024)
+	todoLevel := "WARN"
+	absPathLevel := "ERROR"
+
+	cfg, _, err := config.Load(root)
+	if err != nil {
+		return maxFileSizeBytes, todoLevel, absPathLevel
+	}
+	if cfg.Guard.LargeFileMB > 0 {
+		maxFileSizeBytes = int64(cfg.Guard.LargeFileMB) * 1024 * 1024
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Guard.Todo)) {
+	case "error":
+		todoLevel = "ERROR"
+	case "off", "ignore":
+		todoLevel = ""
+	default:
+		todoLevel = "WARN"
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Guard.AbsolutePath)) {
+	case "warning", "warn":
+		absPathLevel = "WARN"
+	case "off", "ignore":
+		absPathLevel = ""
+	default:
+		absPathLevel = "ERROR"
+	}
+	return maxFileSizeBytes, todoLevel, absPathLevel
+}
+
 // RunPreflightAudit 执行全套工程预检审计
 func RunPreflightAudit(root string) *AuditResult {
 	res := &AuditResult{}
 	gitCtx := newGitContext(root)
+	maxFileSizeBytes, todoLevel, absPathLevel := resolveGuardPolicies(root)
 
 	// 1. 检查私有文件泄露与未隔离状态
 	auditForbiddenFiles(root, res, gitCtx)
 
 	// 2. 检查大文件与可疑二进制资产
-	auditBinaryAndLargeFiles(root, res, gitCtx)
+	auditBinaryAndLargeFiles(root, res, gitCtx, maxFileSizeBytes)
 
 	// 3. 检查代码中的个人机器绝对路径硬编码
-	auditHardcodedPaths(root, res, gitCtx)
+	auditHardcodedPaths(root, res, gitCtx, absPathLevel)
 
 	// 4. 检查临时残留文件与调试草稿（代码洁癖）
 	auditTemporaryAndScratchFiles(root, res, gitCtx)
 
 	// 5. 检查源码内容级洁癖（冲突标记、调试断点、伪代码占位符）
-	auditContentHygiene(root, res, gitCtx)
+	auditContentHygiene(root, res, gitCtx, todoLevel)
 
 	// 6. 检查 vendor 目录纯净度
 	auditVendorCleanliness(root, res)
@@ -234,41 +281,76 @@ func RunPreflightAudit(root string) *AuditResult {
 	return res
 }
 
+// isSafeEnvTemplate 判定是否为公开安全的环境变量示例模板文件
+func isSafeEnvTemplate(baseName string) bool {
+	switch strings.ToLower(baseName) {
+	case ".env.example", ".env.sample", ".env.template":
+		return true
+	default:
+		return false
+	}
+}
+
+// matchForbiddenPrivateFile 判断文件名是否命中敏感私有配置或受管备份资产
+func matchForbiddenPrivateFile(baseName string) (string, bool) {
+	if msg, ok := stagedForbiddenBaseNames[baseName]; ok {
+		return msg, true
+	}
+	lower := strings.ToLower(baseName)
+	if strings.HasPrefix(lower, ".env.") && !isSafeEnvTemplate(lower) {
+		return "环境密钥配置，严禁提交至版本库", true
+	}
+	if strings.HasSuffix(lower, ".agate.bak") {
+		return "Agate 钩子/配置备份文件，应放入 .git/info/exclude 隔离或清理", true
+	}
+	return "", false
+}
+
 // auditForbiddenFiles 检查是否存在被追踪或未隔离的私有配置文件
 func auditForbiddenFiles(root string, res *AuditResult, gitCtx *gitContext) {
-	forbiddenBaseNames := map[string]string{
-		".env":       "环境密钥配置，严禁提交至版本库",
-		".env.local": "本地密钥配置，严禁提交至版本库",
-		"TASK.md":    "AI 任务工作状态草稿，应放入 .git/info/exclude 隔离",
-		"MEMORY.md":  "AI 记忆文件，应放入 .git/info/exclude 隔离",
-	}
-
-	for baseName, msg := range forbiddenBaseNames {
-		p := filepath.Join(root, baseName)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			tracked := gitCtx.isTracked(baseName)
-			ignored := gitCtx.isIgnored(baseName)
-
-			// 若已跟踪入库，或未被本地忽略，则报告违规
-			if tracked || !ignored {
-				level := "ERROR"
-				detailMsg := msg
-				if tracked {
-					detailMsg = fmt.Sprintf("%s (当前已被 Git 跟踪，随时会被提交)", msg)
-				} else {
-					detailMsg = fmt.Sprintf("%s (当前未被 .git/info/exclude 忽略，存在泄露风险)", msg)
-				}
-
-				res.Violations = append(res.Violations, Violation{
-					Level:      level,
-					Category:   "私有文件泄露",
-					File:       baseName,
-					Message:    detailMsg,
-					Suggestion: "运行 `agate isolate` 将其加入本地忽略，若已跟踪请执行 `git rm --cached <文件>`",
-				})
-			}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
-	}
+		if d.IsDir() {
+			if isCommonIgnoredDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, _ := filepath.Rel(root, path)
+		slashRel := filepath.ToSlash(rel)
+		baseName := d.Name()
+
+		msg, matched := matchForbiddenPrivateFile(baseName)
+		if !matched {
+			return nil
+		}
+
+		tracked := gitCtx.isTracked(slashRel)
+		ignored := gitCtx.isIgnored(slashRel)
+
+		// 若已跟踪入库，或未被本地忽略，则报告违规
+		if tracked || !ignored {
+			level := "ERROR"
+			detailMsg := msg
+			if tracked {
+				detailMsg = fmt.Sprintf("%s (当前已被 Git 跟踪，随时会被提交)", msg)
+			} else {
+				detailMsg = fmt.Sprintf("%s (当前未被 .git/info/exclude 忽略，存在泄露风险)", msg)
+			}
+
+			res.Violations = append(res.Violations, Violation{
+				Level:      level,
+				Category:   "私有文件泄露",
+				File:       slashRel,
+				Message:    detailMsg,
+				Suggestion: "运行 `agate isolate` 将其加入本地忽略，若已跟踪请执行 `git rm --cached <文件>`",
+			})
+		}
+		return nil
+	})
 }
 
 // isCommonIgnoredDir 统一判定第三方依赖包、编译器构建产物与缓存目录，执行秒级剪枝
@@ -299,7 +381,10 @@ func isDocOrAssetPath(slashPath string) bool {
 }
 
 // auditBinaryAndLargeFiles 扫描非代码大文件与二进制资产
-func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext) {
+func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext, maxFileSizeBytes int64) {
+	if maxFileSizeBytes <= 0 {
+		maxFileSizeBytes = 5 * 1024 * 1024
+	}
 	forbiddenExts := map[string]string{
 		".exe":   "编译可执行二进制",
 		".dll":   "动态链接库",
@@ -357,7 +442,15 @@ func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext)
 				if fi, err := d.Info(); err == nil {
 					size := fi.Size()
 					if isDocOrAssetPath(slashRel) {
-						if size > 2*1024*1024 {
+						if size > maxFileSizeBytes {
+							res.Violations = append(res.Violations, Violation{
+								Level:      "ERROR",
+								Category:   "大文件拦截",
+								File:       slashRel,
+								Message:    fmt.Sprintf("检测到超大文件 (%d KB > %d KB)，严禁直接入库", size/1024, maxFileSizeBytes/1024),
+								Suggestion: "请压缩文件、使用外部存储或将其加入 .gitignore",
+							})
+						} else if size > 2*1024*1024 {
 							res.Violations = append(res.Violations, Violation{
 								Level:      "WARN",
 								Category:   "大文件图片提醒",
@@ -378,6 +471,19 @@ func auditBinaryAndLargeFiles(root string, res *AuditResult, gitCtx *gitContext)
 						}
 					}
 				}
+			}
+			return nil
+		}
+
+		if fi, err := d.Info(); err == nil && fi.Size() > maxFileSizeBytes {
+			if gitCtx.isTracked(slashRel) || !gitCtx.isIgnored(slashRel) {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "ERROR",
+					Category:   "大文件拦截",
+					File:       slashRel,
+					Message:    fmt.Sprintf("检测到超大文件 (%d KB > %d KB)，严禁直接入库", fi.Size()/1024, maxFileSizeBytes/1024),
+					Suggestion: "请使用外部存储或将其加入 .gitignore / .git/info/exclude",
+				})
 			}
 		}
 
@@ -443,33 +549,32 @@ func findHardcodedMachinePath(line string) string {
 }
 
 // auditHardcodedPaths 扫描代码中写死的个人开发机绝对路径
-func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext) {
+func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext, absPathLevel string) {
+	if absPathLevel == "" {
+		return
+	}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+		rel, _ := filepath.Rel(root, path)
+		slashPath := filepath.ToSlash(rel)
+
 		if d.IsDir() {
-			if isCommonIgnoredDir(d.Name()) || d.Name() == "docs" {
+			if isCommonIgnoredDir(d.Name()) || d.Name() == "docs" || slashPath == "internal/templates" || strings.HasPrefix(slashPath, "internal/templates/") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
-		rel, _ := filepath.Rel(root, path)
-		slashPath := filepath.ToSlash(rel)
 
 		// 若当前文件未被 Git 跟踪且已被 Git 忽略（如本地构建产物），直接跳过
 		if !gitCtx.isTracked(slashPath) && gitCtx.isIgnored(slashPath) {
 			return nil
 		}
 
-		// 仅扫描源码与脚本文件
+		// 仅扫描源码与脚本文件（与 stagedValidCodeExts 保持一致）
 		ext := strings.ToLower(filepath.Ext(path))
-		validExts := map[string]bool{
-			".go": true, ".cmd": true, ".bat": true, ".sh": true,
-			".py": true, ".js": true, ".ts": true, ".yaml": true, ".yml": true,
-		}
-		if !validExts[ext] {
+		if !stagedValidCodeExts[ext] {
 			return nil
 		}
 
@@ -500,11 +605,11 @@ func auditHardcodedPaths(root string, res *AuditResult, gitCtx *gitContext) {
 
 			if matches := findHardcodedMachinePath(line); matches != "" {
 				res.Violations = append(res.Violations, Violation{
-					Level:       "ERROR",
+					Level:       absPathLevel,
 					Category:    "机器绝对路径泄露",
 					File:        slashPath,
 					LineNumber:  lineNum,
-					LineContent: line,
+					LineContent: maskSensitiveLine(strings.TrimSpace(line)),
 					Message:     fmt.Sprintf("代码中检测到写死的个人本地磁盘路径: %s", matches),
 					Suggestion:  "请改用相对路径、环境变量探测（如 os.UserHomeDir()、os.Getenv）",
 				})
@@ -591,6 +696,9 @@ func auditTemporaryAndScratchFiles(root string, res *AuditResult, gitCtx *gitCon
 
 		rel, _ := filepath.Rel(root, path)
 		slashRel := filepath.ToSlash(rel)
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".agate.bak") {
+			return nil
+		}
 		ext := strings.ToLower(filepath.Ext(path))
 
 		if desc, ok := tempExts[ext]; ok {
@@ -611,17 +719,11 @@ func auditTemporaryAndScratchFiles(root string, res *AuditResult, gitCtx *gitCon
 }
 
 // auditContentHygiene 扫描源码中的 Git 冲突标记、调试断点与伪代码占位符
-func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
+func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext, todoLevel string) {
 	conflictRegex := regexp.MustCompile(`^(<{7}|={7}|>{7})(\s|$)`)
 	debuggerRegex := regexp.MustCompile(`(?:^debugger(?:\s*;)?$|breakpoint\(\)|pdb\.set_trace\(\))`)
 	lazyRegex := regexp.MustCompile(`(?i)(?://|/\*|#)\s*(?:\.{2,}|…)\s*(?:保持.*不变|其余.*不变|原有.*不变|代码.*不变|现有.*不变|rest of code unchanged)`)
-
-	validExts := map[string]bool{
-		".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
-		".py": true, ".java": true, ".vue": true, ".html": true, ".sh": true,
-		".cmd": true, ".bat": true, ".rb": true, ".php": true, ".rs": true,
-		".c": true, ".cpp": true, ".h": true,
-	}
+	todoRegex := regexp.MustCompile(`(?i)^(?://|/\*|#)\s*(?:TODO|FIXME)(?:\b|:)`)
 
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -643,7 +745,7 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
-		if !validExts[ext] {
+		if !stagedValidCodeExts[ext] {
 			return nil
 		}
 
@@ -675,7 +777,7 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 					Category:    "代码洁癖-Git冲突残留",
 					File:        slashPath,
 					LineNumber:  lineNum,
-					LineContent: line,
+					LineContent: maskSensitiveLine(strings.TrimSpace(line)),
 					Message:     "检测到未解决的 Git 冲突标记",
 					Suggestion:  "请人工核对并消除 Git 冲突标记",
 				})
@@ -685,7 +787,7 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 					Category:    "代码洁癖-调试断点残留",
 					File:        slashPath,
 					LineNumber:  lineNum,
-					LineContent: line,
+					LineContent: maskSensitiveLine(strings.TrimSpace(line)),
 					Message:     "检测到残留的调试断点代码",
 					Suggestion:  "请清理 debugger 或 breakpoint 等临时排错语句",
 				})
@@ -695,9 +797,19 @@ func auditContentHygiene(root string, res *AuditResult, gitCtx *gitContext) {
 					Category:    "代码洁癖-伪代码占位符",
 					File:        slashPath,
 					LineNumber:  lineNum,
-					LineContent: line,
+					LineContent: maskSensitiveLine(strings.TrimSpace(line)),
 					Message:     "检测到未落地的伪代码占位符（防伪代码红线）",
 					Suggestion:  "代码必须完整可运行，请补齐真实完整实现",
+				})
+			} else if todoLevel != "" && todoRegex.MatchString(trimmed) {
+				res.Violations = append(res.Violations, Violation{
+					Level:       todoLevel,
+					Category:    "代码洁癖-TODO占位符",
+					File:        slashPath,
+					LineNumber:  lineNum,
+					LineContent: maskSensitiveLine(strings.TrimSpace(line)),
+					Message:     "检测到未完成的 TODO/FIXME 占位注释",
+					Suggestion:  "请完成对应逻辑实现或清理过期 TODO 标记",
 				})
 			}
 		}
@@ -749,10 +861,10 @@ func auditArchitectureMaps(root string, res *AuditResult) {
 }
 
 var (
-	stagedPathRegex     = regexp.MustCompile(`(?i)[a-zA-Z]:[\\/](?:Users|hclaw|code_files|Software|AppData)[\\/][^\s"'` + "`" + `<>]+`)
 	stagedConflictRegex = regexp.MustCompile(`^(<{7}|={7}|>{7})(\s|$)`)
 	stagedDebuggerRegex = regexp.MustCompile(`(?:^debugger(?:\s*;)?$|breakpoint\(\)|pdb\.set_trace\(\))`)
 	stagedLazyRegex     = regexp.MustCompile(`(?i)(?://|/\*|#)\s*(?:\.{2,}|…)\s*(?:保持.*不变|其余.*不变|原有.*不变|代码.*不变|现有.*不变|rest of code unchanged)`)
+	stagedTodoRegex     = regexp.MustCompile(`(?i)^(?://|/\*|#)\s*(?:TODO|FIXME)(?:\b|:)`)
 
 	stagedForbiddenExts = map[string]string{
 		".exe":   "编译可执行二进制",
@@ -793,14 +905,53 @@ func RunStagedAudit(root string, stagedFiles []string) *AuditResult {
 	if len(stagedFiles) == 0 {
 		return res
 	}
+	maxFileSizeBytes, todoLevel, absPathLevel := resolveGuardPolicies(root)
 
 	for _, stagedFile := range stagedFiles {
 		slashPath := filepath.ToSlash(stagedFile)
 		baseName := filepath.Base(slashPath)
 		ext := strings.ToLower(filepath.Ext(slashPath))
 
-		// 1. 检查私有文件泄露
-		if msg, ok := stagedForbiddenBaseNames[baseName]; ok {
+		// 0. 检查 vendor/ 目录污染与依赖冗余
+		if strings.HasPrefix(slashPath, "vendor/") {
+			if strings.Contains(slashPath, "/.github/") || strings.HasSuffix(slashPath, "/.github") {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "ERROR",
+					Category:   "Vendor依赖污染",
+					File:       slashPath,
+					Message:    "vendor 目录混入了上游第三方库的 .github 工作流文件",
+					Suggestion: "请运行 `go mod tidy && go mod vendor` 自动净化上游非代码文件",
+				})
+			} else if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "ERROR",
+					Category:   "Vendor依赖污染",
+					File:       slashPath,
+					Message:    fmt.Sprintf("vendor 依赖包中存在非代码图片资产 (%s)", baseName),
+					Suggestion: "请剔除 vendor 中的非必要多媒体资产或运行 `go mod vendor` 重新精简",
+				})
+			} else if (strings.Contains(slashPath, "/site/") || strings.Contains(slashPath, "/doc/")) && ext == ".md" {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "WARN",
+					Category:   "Vendor依赖冗余",
+					File:       slashPath,
+					Message:    "vendor 中存在上游开源库自带的网页或文档目录",
+					Suggestion: "运行 `go mod vendor` 重新瘦身依赖包",
+				})
+			} else {
+				res.Violations = append(res.Violations, Violation{
+					Level:      "WARN",
+					Category:   "Vendor依赖污染",
+					File:       slashPath,
+					Message:    "检测到暂存区包含 vendor/ 目录下的依赖文件变动",
+					Suggestion: "请确认是否需要提交 vendor 目录，或运行 `go mod tidy && go mod vendor` 保持依赖纯净",
+				})
+			}
+			continue
+		}
+
+		// 1. 检查私有文件泄露（含 .env.* 与 *.agate.bak）
+		if msg, ok := matchForbiddenPrivateFile(baseName); ok {
 			res.Violations = append(res.Violations, Violation{
 				Level:      "ERROR",
 				Category:   "私有文件泄露",
@@ -839,7 +990,15 @@ func RunStagedAudit(root string, stagedFiles []string) *AuditResult {
 		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" {
 			size := getStagedFileSize(root, slashPath)
 			if isDocOrAssetPath(slashPath) {
-				if size > 2*1024*1024 {
+				if size > maxFileSizeBytes {
+					res.Violations = append(res.Violations, Violation{
+						Level:      "ERROR",
+						Category:   "大文件拦截",
+						File:       slashPath,
+						Message:    fmt.Sprintf("检测到待提交的超大文件 (%d KB > %d KB)，严禁直接入库", size/1024, maxFileSizeBytes/1024),
+						Suggestion: fmt.Sprintf("执行 `git rm --cached %s` 并将其添加至 .gitignore", slashPath),
+					})
+				} else if size > 2*1024*1024 {
 					res.Violations = append(res.Violations, Violation{
 						Level:      "WARN",
 						Category:   "大文件图片提醒",
@@ -862,6 +1021,17 @@ func RunStagedAudit(root string, stagedFiles []string) *AuditResult {
 			continue
 		}
 
+		if size := getStagedFileSize(root, slashPath); size > maxFileSizeBytes {
+			res.Violations = append(res.Violations, Violation{
+				Level:      "ERROR",
+				Category:   "大文件拦截",
+				File:       slashPath,
+				Message:    fmt.Sprintf("检测到待提交的超大文件 (%d KB > %d KB)，严禁直接入库", size/1024, maxFileSizeBytes/1024),
+				Suggestion: fmt.Sprintf("执行 `git rm --cached %s` 并将其添加至 .gitignore", slashPath),
+			})
+			continue
+		}
+
 		// 5. 源码内容级洁癖检查
 		if !stagedValidCodeExts[ext] {
 			continue
@@ -881,7 +1051,7 @@ func RunStagedAudit(root string, stagedFiles []string) *AuditResult {
 		// 读取暂存区文件的真实内容 (优先通过 git show :path 读取 Index 内容)
 		lines, err := readStagedFileLines(root, slashPath)
 		if err == nil {
-			auditStagedLines(slashPath, lines, res)
+			auditStagedLines(slashPath, lines, res, todoLevel, absPathLevel)
 		}
 	}
 
@@ -934,7 +1104,7 @@ func readStagedFileLines(root, slashPath string) ([]string, error) {
 	return lines, nil
 }
 
-func auditStagedLines(slashPath string, lines []string, res *AuditResult) {
+func auditStagedLines(slashPath string, lines []string, res *AuditResult, todoLevel, absPathLevel string) {
 	for lineIdx, line := range lines {
 		actualLine := lineIdx + 1
 		trimmed := strings.TrimSpace(line)
@@ -946,7 +1116,7 @@ func auditStagedLines(slashPath string, lines []string, res *AuditResult) {
 				Category:    "代码洁癖-Git冲突残留",
 				File:        slashPath,
 				LineNumber:  actualLine,
-				LineContent: line,
+				LineContent: maskSensitiveLine(trimmed),
 				Message:     "检测到未解决的 Git 冲突标记",
 				Suggestion:  "请人工核对并消除 Git 冲突标记",
 			})
@@ -962,34 +1132,44 @@ func auditStagedLines(slashPath string, lines []string, res *AuditResult) {
 				Category:    "代码洁癖-调试断点残留",
 				File:        slashPath,
 				LineNumber:  actualLine,
-				LineContent: line,
+				LineContent: maskSensitiveLine(trimmed),
 				Message:     "检测到残留的调试断点代码",
 				Suggestion:  "请清理 debugger 或 breakpoint 等临时排错语句",
 			})
 		}
 
-		// 伪代码占位符
+		// 伪代码占位符与 TODO 占位注释
 		if stagedLazyRegex.MatchString(line) {
 			res.Violations = append(res.Violations, Violation{
 				Level:       "ERROR",
 				Category:    "代码洁癖-伪代码占位符",
 				File:        slashPath,
 				LineNumber:  actualLine,
-				LineContent: line,
+				LineContent: maskSensitiveLine(trimmed),
 				Message:     "检测到未落地的伪代码占位符（防伪代码红线）",
 				Suggestion:  "代码必须完整可运行，请补齐真实完整实现",
+			})
+		} else if todoLevel != "" && stagedTodoRegex.MatchString(trimmed) {
+			res.Violations = append(res.Violations, Violation{
+				Level:       todoLevel,
+				Category:    "代码洁癖-TODO占位符",
+				File:        slashPath,
+				LineNumber:  actualLine,
+				LineContent: maskSensitiveLine(trimmed),
+				Message:     "检测到未完成的 TODO/FIXME 占位注释",
+				Suggestion:  "请完成对应逻辑实现或清理过期 TODO 标记",
 			})
 		}
 
 		// 机器绝对路径
-		if !isComment && !strings.Contains(line, "<YourUser>") && !strings.Contains(line, "示例") {
+		if absPathLevel != "" && !isComment && !strings.Contains(line, "<YourUser>") && !strings.Contains(line, "示例") {
 			if matches := findHardcodedMachinePath(line); matches != "" {
 				res.Violations = append(res.Violations, Violation{
-					Level:       "ERROR",
+					Level:       absPathLevel,
 					Category:    "机器绝对路径泄露",
 					File:        slashPath,
 					LineNumber:  actualLine,
-					LineContent: line,
+					LineContent: maskSensitiveLine(trimmed),
 					Message:     fmt.Sprintf("代码中检测到写死的个人本地磁盘路径: %s", matches),
 					Suggestion:  "请改用相对路径、环境变量探测（如 os.UserHomeDir()、os.Getenv）",
 				})

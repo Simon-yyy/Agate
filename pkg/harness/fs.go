@@ -79,7 +79,17 @@ func LinkOrCopy(src, dst string) (bool, error) {
 
 	// 非 Windows 系统或允许软链时尝试 Symlink
 	if runtime.GOOS != "windows" {
-		if err := os.Symlink(src, dst); err == nil {
+		linkTarget := src
+		if !filepath.IsAbs(src) {
+			if absSrc, err := filepath.Abs(src); err == nil {
+				if absDst, err := filepath.Abs(dst); err == nil {
+					if rel, err := filepath.Rel(filepath.Dir(absDst), absSrc); err == nil {
+						linkTarget = rel
+					}
+				}
+			}
+		}
+		if err := os.Symlink(linkTarget, dst); err == nil {
 			return true, nil // true 表示创建了软链
 		}
 	}

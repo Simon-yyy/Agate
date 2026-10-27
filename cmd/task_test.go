@@ -50,6 +50,8 @@ func initTaskTestRepo(t *testing.T) (string, func()) {
 		flagTaskAgent = ""
 		flagTaskForce = false
 		flagTaskNextAgent = "any"
+		flagTaskRole = ""
+		flagTaskNextRole = ""
 		flagTaskNote = ""
 		flagTaskSkipVerify = false
 	}
@@ -243,3 +245,135 @@ func TestTaskCmdDoneWorkflow(t *testing.T) {
 		t.Errorf("task status 输出应包含 DONE 与交接记录: %s", buf.String())
 	}
 }
+
+func TestTaskCmdHandoverAndDoneEnforceCircuitBreakerAndStrictConfig(t *testing.T) {
+	tempDir, cleanup := initTaskTestRepo(t)
+	defer cleanup()
+
+	// 配置 strict=true 但不放测试脚本
+	if err := os.MkdirAll(filepath.Join(tempDir, ".agate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".agate", "config.toml"), []byte("[guard]\nstrict = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd.SetArgs([]string{"task", "claim", "--agent=cursor"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("claim 失败: %v", err)
+	}
+
+	// Strike 1: handover 因 strict=true 且无测试套件失败
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"task", "handover", "--agent=cursor"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("strict=true 无测试套件时 task handover 必须被拒绝")
+	}
+
+	// Strike 2: done 再次失败，触发两振熔断
+	buf.Reset()
+	rootCmd.SetArgs([]string{"task", "done", "--agent=cursor"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("strict=true 无测试套件时 task done 必须被拒绝")
+	}
+	if !strings.Contains(buf.String(), "两振熔断警示") {
+		t.Fatalf("连续第二次失败应打印两振熔断警示，实际输出: %s", buf.String())
+	}
+
+	// Strike 3: 即使现在写入通过的自检脚本，未解除熔断前 handover 仍应直接被熔断阻断
+	writeVerifyFixture(t, tempDir, true)
+	buf.Reset()
+	rootCmd.SetArgs([]string{"task", "handover", "--agent=cursor"})
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "两振熔断已开启") {
+		t.Fatalf("熔断锁死期间 task handover 应直接被两振熔断阻断，实际: %v", err)
+	}
+}
+
+func TestTaskCmdMultiRoleLifecycleAndMismatchBlock(t *testing.T) {
+	tempDir, cleanup := initTaskTestRepo(t)
+	defer cleanup()
+
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+
+	// 1. dev 角色认领任务
+	rootCmd.SetArgs([]string{"task", "claim", "--agent=cursor", "--role=dev"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task claim --role=dev 失败: %v", err)
+	}
+	if !strings.Contains(buf.String(), "角色: dev") {
+		t.Errorf("claim 输出应包含角色 dev: %s", buf.String())
+	}
+
+	// 2. dev 交接给 test 角色
+	buf.Reset()
+	flagTaskRole = ""
+	flagTaskNextRole = ""
+	rootCmd.SetArgs([]string{"task", "handover", "--agent=cursor", "--to=antigravity", "--role=dev", "--next-role=test", "--note=提测"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task handover --role=dev --next-role=test 失败: %v", err)
+	}
+
+	// 3. status 应展示当前角色、下一接棒角色与快照指纹
+	buf.Reset()
+	rootCmd.SetArgs([]string{"task", "status"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task status 失败: %v", err)
+	}
+	statusOut := buf.String()
+	if !strings.Contains(statusOut, "当前角色: dev | 下一接棒角色: test") || !strings.Contains(statusOut, "快照指纹:") {
+		t.Errorf("task status 未完整显示角色与快照指纹信息: %s", statusOut)
+	}
+
+	// 4. ops 角色尝试越权接棒 test 任务 -> 必须报错拦截
+	buf.Reset()
+	flagTaskRole = ""
+	rootCmd.SetArgs([]string{"task", "resume", "--agent=antigravity", "--role=ops"})
+	if err := rootCmd.Execute(); err == nil || !strings.Contains(err.Error(), "拒绝角色 [ops] 越权接棒") {
+		t.Fatalf("预期拦截不匹配的 NextRole 接棒，实际: %v", err)
+	}
+
+	// 5. test 角色正常接棒并交接给 ops，随后 ops 接棒归档
+	buf.Reset()
+	flagTaskRole = ""
+	rootCmd.SetArgs([]string{"task", "resume", "--agent=antigravity", "--role=test"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task resume --role=test 失败: %v", err)
+	}
+
+	buf.Reset()
+	flagTaskRole = ""
+	flagTaskNextRole = ""
+	rootCmd.SetArgs([]string{"task", "handover", "--agent=antigravity", "--to=codex", "--role=test", "--next-role=ops"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task handover --role=test --next-role=ops 失败: %v", err)
+	}
+
+	buf.Reset()
+	flagTaskRole = ""
+	rootCmd.SetArgs([]string{"task", "resume", "--agent=codex", "--role=ops"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task resume --role=ops 失败: %v", err)
+	}
+
+	buf.Reset()
+	flagTaskRole = ""
+	rootCmd.SetArgs([]string{"task", "done", "--agent=codex", "--role=ops", "--note=上线归档"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("task done --role=ops 失败: %v", err)
+	}
+
+	// 验证会话角色卡片已生成且 AGENTS.md 未被污染
+	roleCard := filepath.Join(tempDir, ".ai-memory", "sessions", "active-role.md")
+	if _, err := os.Stat(roleCard); err != nil {
+		t.Errorf("预期生成会话角色卡片 active-role.md: %v", err)
+	}
+	agentsData, _ := os.ReadFile(filepath.Join(tempDir, "AGENTS.md"))
+	if string(agentsData) != "# AGENTS" {
+		t.Errorf("严禁污染共享 AGENTS.md，实际内容: %s", string(agentsData))
+	}
+}
+

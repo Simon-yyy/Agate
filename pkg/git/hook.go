@@ -46,7 +46,7 @@ fi
 
 # 增加 Agent/CI 自动化环境指纹检测 (防 PTY 伪终端伪造 TTY 绕过 RSK-001)
 is_agent_env=0
-if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$CODEX_CI" ] || [ -n "$CODEX_SESSION_ID" ] || [ -n "$CODEX_THREAD_ID" ] || [ -n "$AI_AGENT" ]; then
+if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$CURSOR_VERSION" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$ANTIGRAVITY_IDE" ] || [ -n "$CLAUDE_CODE" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$CODEX_CI" ] || [ -n "$CODEX_SESSION_ID" ] || [ -n "$CODEX_THREAD_ID" ] || [ -n "$CODEX_VERSION" ] || [ -n "$CODEX_SHELL" ] || [ -n "$AI_AGENT" ]; then
     is_agent_env=1
 fi
 
@@ -283,7 +283,7 @@ func GetHookStatus(dir ...string) (HookStatusInfo, error) {
 	prePushPath := filepath.Join(effectiveHookDir, "pre-push")
 	if content, err := os.ReadFile(prePushPath); err == nil {
 		status.PrePushExists = true
-		status.PrePushAgate = isAgateManagedHook(string(content)) || strings.Contains(string(content), "ALLOW_AUTOMATED_PUSH")
+		status.PrePushAgate = isAgateManagedHook(string(content))
 	}
 
 	return status, nil

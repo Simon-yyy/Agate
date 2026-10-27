@@ -23,6 +23,24 @@ const (
 	StatusDone          TaskStatus = "DONE"
 )
 
+// 角色协作常量定义
+const (
+	RoleDev  = "dev"
+	RoleTest = "test"
+	RoleOps  = "ops"
+)
+
+// NormalizeRole 校验并归一化角色名（允许 ""、"any"、"none"、"dev"、"test"、"ops"）
+func NormalizeRole(role string) (string, error) {
+	r := strings.ToLower(strings.TrimSpace(role))
+	switch r {
+	case "", "any", "none", RoleDev, RoleTest, RoleOps:
+		return r, nil
+	default:
+		return "", fmt.Errorf("非法角色名称 %q (仅支持 dev, test, ops, any, none)", role)
+	}
+}
+
 // TaskManifest 结构化任务接力单元数据模型
 type TaskManifest struct {
 	TaskId         string     `json:"task_id"`
@@ -30,8 +48,11 @@ type TaskManifest struct {
 	Status         TaskStatus `json:"status"`
 	CurrentAgent   string     `json:"current_agent"`
 	NextAgent      string     `json:"next_agent"`
+	CurrentRole    string     `json:"current_role,omitempty"`
+	NextRole       string     `json:"next_role,omitempty"`
 	LastVerifiedAt string     `json:"last_verified_at"`
 	ReceiptHTML    string     `json:"receipt_html"`
+	SnapshotDigest string     `json:"snapshot_digest"`
 	UpdatedAt      string     `json:"updated_at"`
 	Body           string     `json:"-"` // Markdown 正文内容
 }
@@ -52,8 +73,11 @@ func ParseTaskBoard(content string) (*TaskManifest, error) {
 		Status:         StatusTodo,
 		CurrentAgent:   "none",
 		NextAgent:      "any",
+		CurrentRole:    "none",
+		NextRole:       "any",
 		LastVerifiedAt: "none",
 		ReceiptHTML:    "none",
+		SnapshotDigest: "none",
 		UpdatedAt:      time.Now().Format("2006-01-02 15:04:05"),
 	}
 
@@ -103,10 +127,16 @@ func ParseTaskBoard(content string) (*TaskManifest, error) {
 			manifest.CurrentAgent = val
 		case "next_agent":
 			manifest.NextAgent = val
+		case "current_role":
+			manifest.CurrentRole = val
+		case "next_role":
+			manifest.NextRole = val
 		case "last_verified_at":
 			manifest.LastVerifiedAt = val
 		case "receipt_html":
 			manifest.ReceiptHTML = val
+		case "snapshot_digest":
+			manifest.SnapshotDigest = val
 		case "updated_at":
 			manifest.UpdatedAt = val
 		}
@@ -125,8 +155,17 @@ func FormatTaskBoard(m *TaskManifest) string {
 	sb.WriteString(fmt.Sprintf("status: %s\n", m.Status))
 	sb.WriteString(fmt.Sprintf("current_agent: %s\n", m.CurrentAgent))
 	sb.WriteString(fmt.Sprintf("next_agent: %s\n", m.NextAgent))
+	if m.CurrentRole != "" {
+		sb.WriteString(fmt.Sprintf("current_role: %s\n", m.CurrentRole))
+	}
+	if m.NextRole != "" {
+		sb.WriteString(fmt.Sprintf("next_role: %s\n", m.NextRole))
+	}
 	sb.WriteString(fmt.Sprintf("last_verified_at: %s\n", m.LastVerifiedAt))
 	sb.WriteString(fmt.Sprintf("receipt_html: %s\n", m.ReceiptHTML))
+	if m.SnapshotDigest != "" {
+		sb.WriteString(fmt.Sprintf("snapshot_digest: %s\n", m.SnapshotDigest))
+	}
 	sb.WriteString(fmt.Sprintf("updated_at: %s\n", m.UpdatedAt))
 	sb.WriteString("---\n\n")
 

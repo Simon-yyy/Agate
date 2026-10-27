@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"agate/pkg/harness"
 )
 
 // DefaultExcludedItems 默认需要进行隐形隔离的 AI 私有文件/目录
@@ -193,8 +195,8 @@ func ApplyPrivateExclusions(items []string, dir ...string) (int, error) {
 		newLines = append(newLines, "# --- agate private tracking end ---")
 	}
 
-	outContent := strings.Join(newLines, "\n") + "\n"
-	if err := os.WriteFile(excludePath, []byte(outContent), 0644); err != nil {
+	finalContent := strings.Join(newLines, "\n") + "\n"
+	if err := harness.WriteFileAtomic(excludePath, []byte(finalContent), 0644); err != nil {
 		return 0, fmt.Errorf("写入 .git/info/exclude 失败: %w", err)
 	}
 

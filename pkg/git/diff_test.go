@@ -10,8 +10,8 @@ import (
 
 func runGitTestCommand(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
+	cmd := exec.Command("git", append([]string{"-c", "advice.ignoredHook=false", "-C", dir}, args...)...)
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git %s 失败: %v, output: %s", strings.Join(args, " "), err, string(out))
 	}
@@ -74,5 +74,22 @@ func TestGetGitDiffAndMetadata(t *testing.T) {
 	}
 	if !strings.Contains(diffStaged, "+line 2") {
 		t.Errorf("预期暂存区 diff 包含 '+line 2'，实际为:\n%s", diffStaged)
+	}
+}
+
+func TestGetGitMetadataEmptyRepo(t *testing.T) {
+	tempDir := t.TempDir()
+	runGitTestCommand(t, tempDir, "init")
+	runGitTestCommand(t, tempDir, "symbolic-ref", "HEAD", "refs/heads/main")
+
+	branch, commit, err := GetGitMetadata(tempDir)
+	if err != nil {
+		t.Fatalf("空仓库 GetGitMetadata 报错: %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("空仓库预期通过 symbolic-ref 获取分支名 'main'，实际为: %q", branch)
+	}
+	if commit != "" {
+		t.Errorf("空仓库预期 commit 为空，实际为: %q", commit)
 	}
 }

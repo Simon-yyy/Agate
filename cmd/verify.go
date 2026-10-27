@@ -35,9 +35,11 @@ var verifyCmd = &cobra.Command{
 	Long: `优先调度工程自定义自检脚本（verify.sh 或 verify.cmd）；
 若未配置自定义脚本，则自动探测工程类型（Maven / npm / Go 等）执行测试构建；
 无任何工程描述文件时，执行通用完备性扫描，确保代码无破坏并输出物证。`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		out := cmd.OutOrStdout()
 		startTime := time.Now()
-		fmt.Println("=== [agate verify] 闭环自检 ===")
+		fmt.Fprintln(out, "=== [agate verify] 闭环自检 ===")
 
 		// 解析统一的仓库/工程根目录，兼容子目录调用 (AG-016)
 		workDir := "."
@@ -50,15 +52,14 @@ var verifyCmd = &cobra.Command{
 		}
 		if configPath != "" {
 			for _, warning := range projectConfig.Warnings {
-				fmt.Printf("  \033[93m[i] %s\033[0m\n", warning)
+				fmt.Fprintf(out, "  \033[93m[i] %s\033[0m\n", warning)
 			}
 		}
 		if verifyFailureStreak(workDir) >= 2 {
 			if !flagResumeAfterBreak {
 				return fmt.Errorf("两振熔断已开启：请由人类确认修复后使用 --resume-after-break 恢复自检")
 			}
-			recordVerifySuccess(workDir)
-			fmt.Fprintln(cmd.OutOrStdout(), "[i] 已按显式人工指令解除两振熔断，开始重新自检")
+			fmt.Fprintln(out, "[i] 已按显式人工指令解除两振熔断，开始重新自检")
 		}
 
 		var latestAuditResult *guard.AuditResult
@@ -75,7 +76,7 @@ var verifyCmd = &cobra.Command{
 				if err != nil {
 					return fmt.Errorf("生成 HTML 审查物证报告失败: %w", err)
 				}
-				fmt.Printf("  \033[92m[+] 已生成自包含 HTML 审查物证报告: %s\033[0m\n", outPath)
+				fmt.Fprintf(out, "  \033[92m[+] 已生成自包含 HTML 审查物证报告: %s\033[0m\n", outPath)
 			}
 			return nil
 		}
@@ -83,18 +84,18 @@ var verifyCmd = &cobra.Command{
 		// Phase 0: 仓库安全与代码洁癖前置拦截（支持 --skip-guard 应急逃生与 --staged 暂存区定向模式）
 		onFail := func(summary string, err error) error {
 			elapsed := time.Since(startTime).Round(time.Millisecond)
-			fmt.Fprintf(cmd.OutOrStdout(), "\033[91m[FAIL] %s (耗时: %v)\033[0m\n", summary, elapsed)
+			fmt.Fprintf(out, "\033[91m[FAIL] %s (耗时: %v)\033[0m\n", summary, elapsed)
+			streak := recordVerifyFailure(workDir)
+			printCircuitBreakerWarning(out, streak)
 			if reportErr := triggerReport(false, summary); reportErr != nil {
 				return reportErr
 			}
-			streak := recordVerifyFailure(workDir)
-			printCircuitBreakerWarning(cmd.OutOrStdout(), streak)
 			return err
 		}
 
 		onSuccess := func(summary string) error {
 			elapsed := time.Since(startTime).Round(time.Millisecond)
-			fmt.Printf("\033[92m[PASS] %s (耗时: %v)\033[0m\n", summary, elapsed)
+			fmt.Fprintf(out, "\033[92m[PASS] %s (耗时: %v)\033[0m\n", summary, elapsed)
 			if reportErr := triggerReport(true, summary); reportErr != nil {
 				return reportErr
 			}
@@ -104,11 +105,11 @@ var verifyCmd = &cobra.Command{
 
 		// Phase 0 扫描
 		if flagSkipGuard {
-			fmt.Println("  \033[93m[!] 已启用 --skip-guard 应急模式，跳过 Phase 0 安全红线扫描\033[0m")
+			fmt.Fprintln(out, "  \033[93m[!] 已启用 --skip-guard 应急模式，跳过 Phase 0 安全红线扫描\033[0m")
 		} else if flagStaged {
 			stagedFiles, err := git.GetStagedFiles(workDir)
 			if err != nil {
-				fmt.Println("  \033[93m[!] 无法获取暂存区文件 (当前可能不在 Git 仓库)，平滑回退全量扫描\033[0m")
+				fmt.Fprintln(out, "  \033[93m[!] 无法获取暂存区文件 (当前可能不在 Git 仓库)，平滑回退全量扫描\033[0m")
 				auditResult := guard.RunPreflightAudit(workDir)
 				latestAuditResult = auditResult
 				auditResult.PrintReport()
@@ -116,10 +117,10 @@ var verifyCmd = &cobra.Command{
 					return onFail("Phase 0 安全红线拦截", fmt.Errorf("触发安全护栏拦截"))
 				}
 			} else if len(stagedFiles) == 0 {
-				fmt.Println("  [i] 当前 Git 暂存区 (Index) 无待提交文件，跳过自检")
+				fmt.Fprintln(out, "  [i] 当前 Git 暂存区 (Index) 无待提交文件，跳过自检")
 				return onSuccess("暂存区就绪")
 			} else {
-				fmt.Printf("  [i] 命中 Git 暂存区审查模式，定向审查 %d 个待提交文件...\n", len(stagedFiles))
+				fmt.Fprintf(out, "  [i] 命中 Git 暂存区审查模式，定向审查 %d 个待提交文件...\n", len(stagedFiles))
 				auditResult := guard.RunStagedAudit(workDir, stagedFiles)
 				latestAuditResult = auditResult
 				auditResult.PrintReport()
@@ -153,14 +154,15 @@ var verifyCmd = &cobra.Command{
 
 // runDynamicTests 调度 Phase 1 动态测试（优先自检脚本，其次框架探测）
 func runDynamicTests(workDir string, strict bool) (passed bool, summary string, err error) {
+	out := rootCmd.OutOrStdout()
 	// 1. 优先探测专有验证脚本
 	customScript, shellCmd, shellArgs := detectCustomScript(workDir)
 	if customScript != "" {
-		fmt.Printf("执行本地自检脚本: %s\n", customScript)
+		fmt.Fprintf(out, "执行本地自检脚本: %s\n", customScript)
 		output, runErr := runShellCommandInDir(workDir, shellCmd, shellArgs...)
 		if runErr != nil {
 			if isCommandNotFoundError(runErr) {
-				fmt.Printf("\033[93m[提示] 调度本地脚本 %s 失败 (环境未找到 %s 命令)，平滑降级至框架探测\033[0m\n", customScript, shellCmd)
+				fmt.Fprintf(out, "\033[93m[提示] 调度本地脚本 %s 失败 (环境未找到 %s 命令)，平滑降级至框架探测\033[0m\n", customScript, shellCmd)
 			} else {
 				return false, fmt.Sprintf("本地自检脚本 %s 执行失败: %v\n%s", customScript, runErr, tailLines(output, maxTestLogLines)), fmt.Errorf("本地自检未通过: %w", runErr)
 			}
@@ -171,7 +173,7 @@ func runDynamicTests(workDir string, strict bool) (passed bool, summary string, 
 
 	// 2. 探测常见框架构建测试
 	if ok, name, shell, args := detectFrameworkTests(workDir); ok {
-		fmt.Printf("未配置专用脚本，自动调度 %s 测试套件...\n", name)
+		fmt.Fprintf(out, "未配置专用脚本，自动调度 %s 测试套件...\n", name)
 		output, runErr := runShellCommandInDir(workDir, shell, args...)
 		if runErr != nil {
 			return false, fmt.Sprintf("%s 测试执行失败: %v\n%s", name, runErr, tailLines(output, maxTestLogLines)), fmt.Errorf("%s 测试未通过: %w", name, runErr)
@@ -184,7 +186,7 @@ func runDynamicTests(workDir string, strict bool) (passed bool, summary string, 
 		return false, "严格模式拦截: 未检测到自检脚本或测试套件", fmt.Errorf("未检测到自动化测试套件或自检脚本，严格模式拒绝伪交付")
 	}
 
-	fmt.Println("\033[93m[WARN] 未检测到自动化测试套件或自检脚本 (verify.sh/cmd)，动态测试已跳过\033[0m")
+	fmt.Fprintln(out, "\033[93m[WARN] 未检测到自动化测试套件或自检脚本 (verify.sh/cmd)，动态测试已跳过\033[0m")
 	return true, "静态合规通过 (未执行动态测试)", nil
 }
 
@@ -207,7 +209,7 @@ func detectCustomScript(dir ...string) (script, shell string, args []string) {
 			if bashUsable() {
 				return "verify.sh", "bash", []string{"verify.sh"}
 			}
-			fmt.Println("\033[93m[提示] 检测到 verify.sh，但当前 Windows Bash/WSL 不可用，平滑回退至框架测试探测\033[0m")
+			fmt.Fprintln(rootCmd.OutOrStdout(), "\033[93m[提示] 检测到 verify.sh，但当前 Windows Bash/WSL 不可用，平滑回退至框架测试探测\033[0m")
 			return "", "", nil
 		}
 		return "verify.sh", "./verify.sh", nil
@@ -239,11 +241,11 @@ func inspectFrameworkTest(dir string) (frameworkTestCandidate, bool) {
 			Scripts map[string]string `json:"scripts"`
 		}
 		if err := json.Unmarshal(data, &packageManifest); err != nil {
-			fmt.Println("\033[93m[提示] package.json 无法解析，无法确认 npm 测试脚本，动态测试不予放行\033[0m")
+			fmt.Fprintln(rootCmd.OutOrStdout(), "\033[93m[提示] package.json 无法解析，无法确认 npm 测试脚本，动态测试不予放行\033[0m")
 			return frameworkTestCandidate{}, false
 		}
 		if strings.TrimSpace(packageManifest.Scripts["test"]) == "" {
-			fmt.Println("\033[93m[提示] 侦测到 package.json 但未定义 scripts.test，动态测试不予放行\033[0m")
+			fmt.Fprintln(rootCmd.OutOrStdout(), "\033[93m[提示] 侦测到 package.json 但未定义 scripts.test，动态测试不予放行\033[0m")
 			return frameworkTestCandidate{}, false
 		}
 		return frameworkTestCandidate{name: "npm", command: "npm", args: []string{"test"}}, true
@@ -268,7 +270,7 @@ func detectFrameworkTests(dir ...string) (bool, string, string, []string) {
 		return false, "", "", nil
 	}
 	if _, err := exec.LookPath(candidate.command); err != nil {
-		fmt.Printf("\033[93m[提示] 侦测到 %s 测试配置但系统未安装 %s 命令，按 SPEC 规范平滑降级\033[0m\n", candidate.name, candidate.command)
+		fmt.Fprintf(rootCmd.OutOrStdout(), "\033[93m[提示] 侦测到 %s 测试配置但系统未安装 %s 命令，按 SPEC 规范平滑降级\033[0m\n", candidate.name, candidate.command)
 		return false, "", "", nil
 	}
 	return true, candidate.name, candidate.command, candidate.args
@@ -282,7 +284,12 @@ func tailLines(s string, maxLines int) string {
 	if s == "" {
 		return ""
 	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], "\r")
+	}
 	if len(lines) <= maxLines {
 		return strings.Join(lines, "\n")
 	}

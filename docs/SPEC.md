@@ -63,7 +63,7 @@ logs/
 2. **私有状态资产（本地排除）**：
    - 个人 AI 会话记录、Memory 记忆卡片、临时 Task 进度追踪、本地环境变量（`.env*`）等。
 3. **幂等性与零污染契约**：
-   - **块级防破坏追加**：写入 `.git/info/exclude` 时必须使用包含标记符（`# --- agate private tracking start ---` 与 `# --- agate private tracking end ---`）的专用受管块，新追加项精准插入在 end 标记内侧，绝不覆写用户原有的排除配置；
+   - **块级防破坏追加**：写入 `.git/info/exclude` 时必须使用包含标记符（`# --- agate private tracking start ---` 与 `# --- agate private tracking end ---`）的专用受管块，新追加项精准插入在 end 标记内侧，绝不覆写用户原有的排除配置，并通过 `WriteFileAtomic` 原子落盘；
    - **完全本地生效**：`.git/info/exclude` 仅在开发者本地 `.git` 目录生效，不进版本库，不修改项目公共 `.gitignore`，杜绝协同 Diff 噪音。
 
 ---
@@ -71,27 +71,37 @@ logs/
 ## 三、 Git Hook 门禁安装与防篡改策略 (M4 规范)
 
 ### 3.1 拦截阶段与职责
-- **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify --staged`。直接从 Git Index（暂存区）提取待提交文件并通过 `git show :<path>` 针对性审查，毫秒级快速就绪，精准拦截私有密钥、超大文件、机器硬编码绝对路径、未完工占位符等违规内容，工作区脏文件不产生误拦；
-- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端中，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 环境变量白名单才准予进入全量验证并放行。
+- **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify --staged`。直接从 Git Index（暂存区）提取待提交文件并通过 `git show :<path>` 针对性审查，毫秒级快速就绪，精准拦截私有密钥、超大文件、机器硬编码绝对路径、未完工占位符及 `vendor/` 污染等违规内容，工作区脏文件不产生误拦；
+- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端或检测到 Agent/CI 环境变量指纹（含 `CLAUDE_CODE`、`ANTIGRAVITY_IDE`、`CURSOR_VERSION`、`CODEX_VERSION`、`CODEX_SHELL` 等）时，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 白名单才准予进入全量验证并放行。
 
-### 3.2 Hook 安装与防篡改策略
+### 3.2 Hook 安装与规约分发防篡改策略
 1. **非破坏性备份**：若检测到开发者已有同名 Hook，必须自动重命名备份（如 `pre-commit.agate.bak`），严禁静默覆盖；
 2. **标记行识别**：写入的脚本必须带有 `# --- agate hook: <type> ---` 专用标识行；
 3. **精准清理还原**：在执行卸载或移除时，仅精准移除由 agate 管理的钩子并还原原备份脚本，完好保留用户自定义钩子；
-4. **规约与原子安全落盘**：向工作区分发规约（如 `.cursorrules`）时，内容一致免写，存在不同既有内容时自动备份为 `[文件名].agate.bak`，并通过临时文件 + `fsync` + `rename` 真原子落盘（崩溃安全）。
+4. **受管区块合并与原子安全落盘**：向工作区分发规约（如 `AGENTS.md`、`.cursorrules`、`CLAUDE.md` 等）时，统一使用 `<!-- agate:<agent>-rules:start/end -->` 受管区块合并，保留区块外用户原有内容与既有 `.agate.bak`；对已受 Git 跟踪的规则文件（含大小写不敏感文件系统下通过 `os.SameFile` 识别的同名物理文件）须显式传入 `--allow-tracked` 方可更新，并通过临时文件 + `fsync` + `rename` 真原子落盘。
 
 ### 3.3 状态可观测性
 - 支持通过 `agate hook status` 结构化查询 `core.hooksPath`、`pre-commit` 与 `pre-push` 托管状态，提供开箱即用的门禁可视看板。
 
 ---
 
-## 四、 项目级配置规范 (`.agate/config.toml`)
+## 四、 三层策略配置规范 (全局 / 项目 / 本机私有)
 
-项目可以通过 `.agate/config.toml` 覆盖默认 Agent 目标、严格验证和 Hook 安装策略。优先级为：命令行参数 > 项目配置 > 当前 Agent 自动识别 > 项目已有配置 > 内置默认值。
+Agate 支持个人全局（`~/.agate/config.toml` 或 `AGATE_GLOBAL_CONFIG`）、团队共享项目级（`.agate/config.toml`）与本机私有项目覆写（`.agate/config.local.toml`，自动加入 `.git/info/exclude`）三层配置合并。目标选择优先级为：命令行 `-t` 参数 > 配置中的 `agent.targets` > 当前 Agent 环境指纹（内置与自定义档案 `env_keys` 强指纹优先于宿主终端 `term_programs` 弱指纹） > 项目已有规则入口；空白未知环境返回错误要求显式选择，不猜测默认工具。
 
 ```toml
 [agent]
 targets = ["codex", "cursor"]
+
+[agent.profiles.example-tool]
+path = ".example-tool/rules/agate.mdc"
+format = "frontmatter-md"
+confirmed = true
+source = "工具手册与本地路径核对记录"
+version = "本机实际版本"
+reads = ["AGENTS.md"]
+env_keys = ["EXAMPLE_AGENT"]
+term_programs = ["example-ide"]
 
 [guard]
 strict = true
@@ -103,15 +113,15 @@ large_file_mb = 20
 install = true
 ```
 
-`agent.targets`、`guard.strict` 和 `hooks.install` 当前生效。`guard.todo`、`guard.absolute_path` 与 `guard.large_file_mb` 当前作为可解析占位字段，Agate 会提示暂未启用对应策略，不会静默改变审计行为。配置语法错误或未知字段会阻止初始化/验证并返回错误。
+`agent.targets`、`agent.profiles.<name>`、`guard.strict`、`guard.todo`（`warning`/`error`/`off`）、`guard.absolute_path`（`error`/`warning`/`off`）、`guard.large_file_mb` 和 `hooks.install` 均已全量接入生效；本机私有 `.agate/config.local.toml` 对安全门禁遵循**单调收紧（Monotonic Tightening，只升不降）**，不能放宽团队已启用的安全红线。配置语法错误、未知字段或越界/保留路径会阻止初始化/验证并返回错误。
 
 ---
 
-### 4.2 未预置第三方 Agent 接入约定
+### 4.2 开放式第三方 Agent 接入约定
 
-Agate 采用“**双地图为规范本体，主流预置分发，物理门禁透明兜底**”的开闭原则（Open-Closed Principle）：
+Agate 采用“**双地图为规范本体，主流预置与开放式档案分发，物理门禁透明兜底**”的开闭原则（Open-Closed Principle）：
 1. **解耦原则**：工程认知本体沉淀于根目录公共文件（`MAP.md` 与 `contexts/context.md`），而非强绑定在某一商业 IDE 格式；
-2. **长尾软件接入契约**：对于 GitHub Copilot、Cline、Trae、Continue、Aider 等未预置目标，开发者无需等待 CLI 支持，可通过软链既有 `.cursorrules`、在专有 instructions 文件中引用 `contexts/context.md`，或首轮对话输入寻路指令即可获得完整约束；
+2. **长尾软件零代码扩展契约**：对于 GitHub Copilot、Cline、Trae、Continue、Aider 等未预置目标，开发者可通过 `agate profile add <name>`（或配置 `[agent.profiles.<name>]`）声明 `markdown`、`frontmatter-md`（`.mdc`）或 `pointer` 三大范式规则入口及 `env_keys` / `term_programs` 环境指纹，获得与内置工具同等的自动识别、受管合并与 `.code-workspace` 独立视图支持；
 3. **安全底座零死角**：`.git/info/exclude` 隐形忽略、`pre-commit` 暂存区审计与 `pre-push` 物理防偷跑钩子在操作系统与 Git 进程级透明运行，任何非预置 Agent 或第三方编辑器均无权绕过。
 
 ---
@@ -164,7 +174,7 @@ Agate 采用“**双地图为规范本体，主流预置分发，物理门禁透
 | :--- | :--- | :--- | :--- |
 | **`0`** | `[PASS]` | 验证全部通过，安全合规且测试绿灯 | 准予提交或交工，向用户呈现通过物证 |
 | **`1`** | `[FAIL]` | 触发安全红线拦截、编译失败或单测报错 | 阻断提交，触发诊断修复；若连续第 2 次为 1，立即触发两振熔断 |
-| **`2`** | `[USAGE_ERR]` | CLI 命令参数解析错误或运行时内部异常 | 阻断流程，检查命令调用传参合法性 |
+| **`2`** | `[USAGE_ERR]` | CLI 命令参数解析错误、未知子命令或非法位置参数 | 阻断流程，检查命令调用传参合法性 |
 
 ### 6.2 交付物证格式
 Agent 向用户交付时，聊天框必须包含类似下述格式的实机物证回显：
@@ -176,7 +186,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 
 ### 6.3 两振熔断机制协议 (Two-Strike Circuit Breaker)
 1. **物理计数器**：系统在隐形隔离区 `.ai-memory/.verify_streak` 中原子维护连续自检失败的次数（ASCII 格式数字）；
-2. **重置触发**：任意一次自检成功获得退出码 `0` 时，计数器文件被原子清理并归零；
+2. **重置触发**：任意一次自检（含 `--resume-after-break` 恢复自检、`task handover` 与 `task done` 自检）成功获得退出码 `0` 时，计数器文件被原子清理并归零；若恢复自检依然失败，计数器继续累加并保持熔断锁死；
 3. **熔断与红线警示**：当连续失败次数 `>= 2` 时：
    - CLI 强制向终端标准错误/输出打印醒目红色熔断框；
    - Agent 必须将当次轮次标记为最终轮次（`IsFinal=true`），严禁继续盲目猜测与死循环修改代码；
@@ -190,7 +200,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 针对人类审查、合规归档与异步复盘场景，`agate export` 与 `agate view` 遵循如下标准：
 1. **零外部网络依赖**：禁止引用外部 CDN 样式、字体或远程脚本，单文件必须内嵌完整 CSS 与轻量 JS，双击即开；
 2. **长文本与日志折叠**：原生使用 `<details>/<summary>` 对任务目标、测试控制台日志、技术契约与 Diff 差异进行层级折叠；
-3. **红绿对比与安全体检**：高维直观呈现本次改动的 `git diff`（支持暂存区/工作区差异）以及 Phase 0 7 大安全卡口扫描细节；
+3. **红绿对比、自动脱敏与安全体检**：高维直观呈现本次改动的 `git diff`（支持暂存区/工作区差异）以及已执行敏感信息脱敏的 Phase 0 7 大安全卡口扫描细节，明确区分“未执行动态测试”与“动态测试未通过”；
 4. **隐形存储隔离**：默认写入 `.ai-memory/reviews/review-<timestamp>.html`，天然受 `.git/info/exclude` 隐形隔离，保障业务仓库 100% 零污染。
 
 ---
@@ -198,18 +208,18 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 ## 八、 跨 Agent 任务接力与记忆治理规范 (Agate Relay)
 
 ### 8.1 双模任务接力单规范 (TASK.md)
-1. **YAML Frontmatter 状态机**：必须包含 `task_id`、`title`、`status`、`current_agent`、`next_agent`、`receipt_html` 与 `updated_at`。各状态转换契约如下：
+1. **YAML Frontmatter 状态机**：包含 `task_id`、`title`、`status`、`current_agent`、`next_agent`、`current_role`、`next_role`、`receipt_html`、`snapshot_digest` 与 `updated_at`。各状态转换契约如下：
    | 动作命令 | 前置状态 | 目标状态 | 附带动作与副作用 |
    | :--- | :--- | :--- | :--- |
-   | `agate task claim` | `TODO` / `HANDOVER_READY` | `CLAIMED` | 抢占创建 `.ai-memory/locks/task.lock`（租约 2 小时） |
-   | `agate task handover` | `CLAIMED` / `IN_PROGRESS` | `HANDOVER_READY` | 触发自检门禁、编译 HTML 物证并向正文追加交接时间线 |
-   | `agate task resume` | `HANDOVER_READY` / `BLOCKED` | `IN_PROGRESS` | 继承前任接力四要素、刷新持锁人信息与当前时间戳 |
-   | `agate task done` | `CLAIMED` / `IN_PROGRESS` / `HANDOVER_READY` | `DONE` | 执行全量自检闭环、解绑并清空互斥锁、打上完成时间戳 |
+   | `agate task claim` | `TODO` / `HANDOVER_READY` | `CLAIMED` | 抢占创建 `.ai-memory/locks/task.lock`（租约 2 小时，记录 `role` 与 `session_id`），当指定 `--role` 时生成 `.ai-memory/sessions/active-role.md` 会话角色卡 |
+   | `agate task handover` | `CLAIMED` / `IN_PROGRESS` | `HANDOVER_READY` | 强制执行 Phase 0 与动态测试门禁（联动 `guard.strict` 与两振熔断）、绑定代码快照摘要 `snapshot_digest`、编译 HTML 物证并向正文追加交接时间线 |
+   | `agate task resume` | `HANDOVER_READY` / `BLOCKED` | `IN_PROGRESS` | 核验指定 `next_agent` 与 `next_role` 接棒权限、核对 `snapshot_digest` 代码快照一致性（`test`/`ops` 角色发现快照过期或物证缺失时输出阻塞级复验提示）、继承前任接力四要素、刷新持锁人信息与当前时间戳 |
+   | `agate task done` | `CLAIMED` / `IN_PROGRESS` / `HANDOVER_READY` | `DONE` | 执行全量自检闭环（联动 `guard.strict` 与两振熔断，`ops` 角色强制校验审查物证与最新 `snapshot_digest` 绑定）、解绑并清空互斥锁、打上完成时间戳 |
 2. **接力四要素 (Handover Quartet)**：正文必须结构化包含【已完成事项】、【在途断点】、【接棒建议与下一步】以及【暗坑警示】；
 3. **不可篡改流转审计时间线 (Handover Timeline)**：
    - 表头格式：`| 交接时间 | 交接者 (From) | 接棒者 (To) | 审查物证凭单 | 核心备忘批注 |`；
-   - 截断防护：解析时严格防御 Markdown 表格对正文“暗坑警示”四要素的污染；首行统一进行 CRLF 归一化。
-4. **互斥软租约锁与过渡守护**：多 Agent 施工通过 `.ai-memory/locks/task.lock` 互斥保护（默认 2 小时租约），读写之间由 `.task.lock.transition` 原子排他守护（带 30s 自动过期自愈），彻底消除并发抢锁竞态；handover 与 done 强制校验持锁所有权，DONE 终态任务严禁重新认领。
+   - 截断与转义防护：解析时严格防御 Markdown 表格对正文“暗坑警示”四要素的污染，备注内 `|` 自动转义为 `\|`；首行统一进行 CRLF 归一化。
+4. **互斥软租约锁与过渡守护**：多 Agent 与同工具多会话施工通过 `.ai-memory/locks/task.lock` 互斥保护（含 `session_id` 隔离，默认 2 小时租约），加锁（`AcquireLock`）与释放锁（`ReleaseLock`）均由 `.task.lock.transition` 原子排他守护（带 30s 自动过期原子重命名自愈），彻底消除并发抢锁与释放竞态；`handover` 与 `done` 强制校验持锁所有权，`DONE` 终态任务严禁重新认领。
 
 ### 8.2 记忆资产分层治理 (Memory Governance)
 1. **L0 任务级临时记忆**：偶发报错、临时网络状态与在途断点仅允许记录于 `TASK.md`，交接或任务归档后自然消亡，严禁全局泛化；
@@ -222,7 +232,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
 ### 9.1 唯一专有命名空间
 系统在架构设计、命令行接口、Git Hook 门禁及配置路径上全面统一使用 `agate`（Agent Gate）专有品牌与命名空间，严禁保留历史旧别名：
 1. **CLI 命令与二进制**：全局仅使用 `agate` 独立可执行二进制；Git Hook 物理门禁（`pre-commit` / `pre-push`）仅识别并调用 `agate`；
-2. **私有隔离标识**：`.git/info/exclude` 仅使用 `# agate private tracking start` 与 `# agate private tracking end` 规范标记块；
+2. **私有隔离标识**：`.git/info/exclude` 仅使用 `# --- agate private tracking start ---` 与 `# --- agate private tracking end ---` 规范标记块；
 3. **全局规约路径**：规约探测引擎标准候选路径为 `~/.config/agate/rules.md` 与 `~/.agate/rules.md`。
 
 ---
@@ -238,4 +248,21 @@ Jev Skills 是 Agate 之外的可选判断能力，用于为语义模糊的检�
 5. **不确定性处理**：`needs_review`、空值、未知结果、API 错误或上下文不足，必须转为人工确认或补充证据，不得静默重试、模拟或自动放行；
 6. **模拟模式标识**：在无 API 调用的 Agent 模拟模式中，输出必须明确标记为模拟，不得伪造 Jev 概率、置信度或调用回执。
 
+---
 
+## 十一、 开放式工具扩展与独立窗口视图规范 (Open Profile & Workspace View)
+
+### 11.1 三大规则渲染范式与工具档案契约
+1. **`markdown`**：以工具专属 HTML 注释受管区块（`<!-- agate:<target>-rules:start/end -->`）合并完整规约，严格保留受管区块外的用户自定义文本与换行符；
+2. **`frontmatter-md`**：面向 `.mdc` 等带 YAML 头部的规则文件，新建时自动注入顶部 YAML Frontmatter（默认 `description: Agate Engineering Guardrails` 与 `alwaysApply: true`，或读取 `frontmatter` 自定义配置），更新时严格保留已存在的第 1 行用户 YAML Frontmatter；
+3. **`pointer`**：面向轻量或具备跨文件读取能力的工具，仅在受管区块内写入 3-Hop 寻路、两阶段硬门禁与 `agate verify` 引导块，并内嵌 `<!-- agate:rules-sha256:<hex> -->` 完整规约摘要以确保版本一致性盘点；
+4. **动态环境指纹**：支持在档案中声明 `env_keys`（强指纹）与 `term_programs`（弱指纹），通过 `agate profile add <name>` 落盘至个人全局（`~/.agate/config.toml`）、团队项目（`.agate/config.toml`）或本机私有（`.agate/config.local.toml`）。
+
+### 11.2 三层配置合并与安全单调收紧规范
+1. **加载顺序**：`~/.agate/config.toml`（或 `AGATE_GLOBAL_CONFIG`） $\rightarrow$ `.agate/config.toml` $\rightarrow$ `.agate/config.local.toml`；
+2. **单调收紧（Monotonic Tightening）**：本机私有 `.agate/config.local.toml` 仅允许收紧安全红线，禁止将团队已启用的 `guard.strict = true` 或 `hooks.install = true` 降级为 `false`，亦禁止降低 `guard.todo` 与 `guard.absolute_path` 的拦截等级。
+
+### 11.3 窗口级独立视图规范 (`agate workspace`)
+1. **物理存储与零侵入**：视图文件固定生成于 `.ai-memory/workspaces/<target>.code-workspace`，严禁修改团队共享 `.vscode/settings.json` 或删除、移动任何物理规则文件；
+2. **精确过滤边界**：仅在当前工具窗口的 `files.exclude` 与 `search.exclude` 中隐藏其他工具的规则文件路径，保留当前工具规则及 `MAP.md`、`contexts/context.md`、`TASK.md`、`MEMORY.md`，严禁整体隐藏 `.gemini` 或 `.cursor` 目录；
+3. **显式免责声明**：CLI 必须向用户提示“隐藏仅影响当前窗口展示，不代表停止客户端加载底层物理文件”；对不支持 `.code-workspace` 的纯 CLI 工具（如 `codex`、`claude`）明确降级跳过。

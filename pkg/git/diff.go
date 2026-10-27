@@ -13,7 +13,7 @@ func GetGitDiff(staged bool, dir ...string) (string, error) {
 		return "", err
 	}
 
-	args := []string{"diff"}
+	args := []string{"-c", "core.quotepath=false", "diff"}
 	if staged {
 		args = append(args, "--cached")
 	}
@@ -43,6 +43,15 @@ func GetGitMetadata(dir ...string) (branch string, commit string, err error) {
 	cmdBranch.Stdout = &outBranch
 	if err := cmdBranch.Run(); err == nil {
 		branch = strings.TrimSpace(outBranch.String())
+	} else {
+		// 空仓库尚无 Commit 时，回退通过 symbolic-ref 获取当前分支名
+		cmdSym := exec.Command("git", "symbolic-ref", "--short", "-q", "HEAD")
+		cmdSym.Dir = root
+		var outSym bytes.Buffer
+		cmdSym.Stdout = &outSym
+		if symErr := cmdSym.Run(); symErr == nil {
+			branch = strings.TrimSpace(outSym.String())
+		}
 	}
 
 	// 2. 获取 Commit 短 Hash

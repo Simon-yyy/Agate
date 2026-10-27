@@ -368,7 +368,7 @@
           <div class="violation-card {{.Level}}">
             <div class="violation-title">
               <span>[{{.Level}}] {{.Category}}</span>
-              <span style="font-size: 12px; opacity: 0.8;">{{.File}}:{{.LineNumber}}</span>
+              <span style="font-size: 12px; opacity: 0.8;">{{.File}}{{if gt .LineNumber 0}}:{{.LineNumber}}{{end}}</span>
             </div>
             <div>{{.Message}}</div>
             {{if .LineContent}}
@@ -397,8 +397,10 @@
         </div>
         {{if .TestPassed}}
         <span class="meta-badge pass" style="font-size: 11px; padding: 2px 8px;">测试通过</span>
+        {{else if or .TestOutput .TestExecuted}}
+        <span class="meta-badge fail" style="font-size: 11px; padding: 2px 8px;">❌ 测试未通过</span>
         {{else}}
-        <span class="meta-badge fail" style="font-size: 11px; padding: 2px 8px;">测试未通过/未执行</span>
+        <span class="badge-count" style="font-size: 11px; padding: 2px 8px;">⚪ 未执行动态测试</span>
         {{end}}
       </summary>
       <div class="section-content">

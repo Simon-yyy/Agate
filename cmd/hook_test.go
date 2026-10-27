@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -66,5 +67,21 @@ func TestHookStatusCmd(t *testing.T) {
 	rootCmd.SetArgs([]string{"hook", "uninstall"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("hook uninstall 失败: %v", err)
+	}
+}
+
+func TestHookUnknownSubcommandReturnsUsageExitCode(t *testing.T) {
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"hook", "nonexistent"})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("未知 hook 子命令必须返回错误")
+	}
+	var usageErr *UsageError
+	if !errors.As(err, &usageErr) {
+		t.Fatalf("未知 hook 子命令预期返回 *UsageError (退出码 2)，实际 err: %T (%v)", err, err)
 	}
 }

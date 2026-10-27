@@ -70,6 +70,11 @@ func TestInstallAndUninstallHooks(t *testing.T) {
 	if !strings.Contains(contentStr, "$CODEX_SESSION_ID") || !strings.Contains(contentStr, "$CODEX_THREAD_ID") {
 		t.Errorf("pre-push 脚本未包含 Codex 自动化环境指纹")
 	}
+	for _, key := range []string{"$CLAUDE_CODE", "$ANTIGRAVITY_IDE", "$CURSOR_VERSION", "$CODEX_VERSION", "$CODEX_SHELL"} {
+		if !strings.Contains(contentStr, key) {
+			t.Errorf("pre-push 脚本缺少自动化环境指纹 %s", key)
+		}
+	}
 
 	// 执行卸载
 	if err := UninstallHooks(); err != nil {

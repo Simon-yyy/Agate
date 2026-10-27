@@ -635,3 +635,203 @@ func TestGitContextBatchIgnoredPerformance(t *testing.T) {
 		t.Errorf("temp_build/artifact.bin 预期被识别为忽略")
 	}
 }
+
+func TestIgnoredFileDoesNotPoisonParentDirForNewUntrackedFiles(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-ignored-parent-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = tempDir
+	if err := gitInit.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte("*.log\n"), 0644)
+	subDir := filepath.Join(tempDir, "pkg", "service")
+	_ = os.MkdirAll(subDir, 0755)
+	// 先放入被忽略的普通文件 debug.log
+	_ = os.WriteFile(filepath.Join(subDir, "debug.log"), []byte("ignored log"), 0644)
+	// 同目录下存在未跟踪的违规 .go 与 .bak 文件
+	_ = os.WriteFile(filepath.Join(subDir, "dirty.go"), []byte("package service\nfunc run() {\n\tdebugger\n}\n"), 0644)
+	_ = os.WriteFile(filepath.Join(subDir, "orphan.bak"), []byte("backup"), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	if !res.HasErrors() {
+		t.Fatalf("同目录存在被忽略文件 debug.log 时，其它未忽略违规文件绝不能漏检")
+	}
+
+	foundDebugger := false
+	foundBak := false
+	for _, v := range res.Violations {
+		if v.File == "pkg/service/dirty.go" && v.Category == "代码洁癖-调试断点残留" {
+			foundDebugger = true
+		}
+		if v.File == "pkg/service/orphan.bak" && v.Category == "代码洁癖-临时文件残留" {
+			foundBak = true
+		}
+	}
+	if !foundDebugger || !foundBak {
+		t.Errorf("未完整捕获同目录下的违规文件: foundDebugger=%v, foundBak=%v, violations=%+v", foundDebugger, foundBak, res.Violations)
+	}
+}
+
+func TestViolationLineContentIsMasked(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-mask-violation-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dirtyCode := "package main\nfunc init() {\n\tapiKey := \"sk-live-secret999\"; breakpoint()\n\tpassword := \"myPass123\"; p := \"C:\\\\Users\\\\Admin\\\\secret.txt\"\n\tsecret := \"topSecret\" // ... 保持原有逻辑不变\n}\n"
+	_ = os.WriteFile(filepath.Join(tempDir, "secret.go"), []byte(dirtyCode), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	if len(res.Violations) < 3 {
+		t.Fatalf("预期捕获至少 3 处违规项，实际: %d", len(res.Violations))
+	}
+	for _, v := range res.Violations {
+		if strings.Contains(v.LineContent, "sk-live-secret999") || strings.Contains(v.LineContent, "myPass123") || strings.Contains(v.LineContent, "topSecret") {
+			t.Errorf("Violation.LineContent 未脱敏，泄露了明文密钥: %s", v.LineContent)
+		}
+		if !strings.Contains(v.LineContent, "******") {
+			t.Errorf("Violation.LineContent 预期包含脱敏掩码 ******，实际为: %s", v.LineContent)
+		}
+	}
+
+	stagedRes := RunStagedAudit(tempDir, []string{"secret.go"})
+	if len(stagedRes.Violations) < 3 {
+		t.Fatalf("RunStagedAudit 预期捕获至少 3 处违规项，实际: %d", len(stagedRes.Violations))
+	}
+	for _, v := range stagedRes.Violations {
+		if strings.Contains(v.LineContent, "sk-live-secret999") || strings.Contains(v.LineContent, "myPass123") || strings.Contains(v.LineContent, "topSecret") || !strings.Contains(v.LineContent, "******") {
+			t.Errorf("RunStagedAudit Violation.LineContent 未脱敏: %s", v.LineContent)
+		}
+	}
+}
+
+func TestEnvWildcardAndAgateBakAndStagedVendor(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "agate-guard-env-vendor-*")
+	if err != nil {
+		t.Fatalf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = tempDir
+	_ = gitInit.Run()
+
+	_ = os.WriteFile(filepath.Join(tempDir, ".env.production"), []byte("DB_PASS=123"), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, ".env.example"), []byte("DB_PASS=example"), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, ".env.sample"), []byte("DB_PASS=sample"), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, ".env.template"), []byte("DB_PASS=template"), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, "pre-commit.agate.bak"), []byte("#!/bin/sh"), 0644)
+
+	res := RunPreflightAudit(tempDir)
+	files := make(map[string]string)
+	for _, v := range res.Violations {
+		files[v.File] = v.Category
+	}
+	if files[".env.production"] != "私有文件泄露" {
+		t.Errorf("预期拦截 .env.production 为私有文件泄露，实际: %v", files)
+	}
+	if files["pre-commit.agate.bak"] != "私有文件泄露" {
+		t.Errorf("预期拦截 pre-commit.agate.bak 为私有文件泄露，实际: %v", files)
+	}
+	for _, safeEnv := range []string{".env.example", ".env.sample", ".env.template"} {
+		if _, blocked := files[safeEnv]; blocked {
+			t.Errorf("安全的环境模板文件 %s 不应被拦截", safeEnv)
+		}
+	}
+
+	stagedRes := RunStagedAudit(tempDir, []string{
+		".env.production",
+		".env.example",
+		"pre-commit.agate.bak",
+		"vendor/github.com/foo/bar/lib.go",
+	})
+	stagedMap := make(map[string]Violation)
+	for _, v := range stagedRes.Violations {
+		stagedMap[v.File] = v
+	}
+	if _, ok := stagedMap[".env.production"]; !ok {
+		t.Errorf("RunStagedAudit 未拦截 .env.production")
+	}
+	if _, ok := stagedMap[".env.example"]; ok {
+		t.Errorf("RunStagedAudit 不应拦截 .env.example")
+	}
+	if _, ok := stagedMap["pre-commit.agate.bak"]; !ok {
+		t.Errorf("RunStagedAudit 未拦截 pre-commit.agate.bak")
+	}
+	if v, ok := stagedMap["vendor/github.com/foo/bar/lib.go"]; !ok || v.Level != "WARN" {
+		t.Errorf("RunStagedAudit 对 vendor/ 暂存文件预期产生 WARN 违规，实际: %+v", v)
+	}
+}
+
+func TestProjectConfigGuardPoliciesEffective(t *testing.T) {
+	tempDir := t.TempDir()
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = tempDir
+	if err := gitInit.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".agate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 准备含 TODO 和硬编码绝对路径的源码文件，以及 2MB 数据文件
+	codeContent := "package main\n// TODO: 待补齐鉴权实现\nvar path = \"C:\\\\Users\\\\Alice\\\\secret.txt\"\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "app.go"), []byte(codeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	twoMBData := make([]byte, 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(tempDir, "dataset.dat"), twoMBData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 场景 1: large_file_mb = 1, todo = "error", absolute_path = "warning"
+	cfg1 := "[guard]\nlarge_file_mb = 1\ntodo = \"error\"\nabsolute_path = \"warning\"\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".agate", "config.toml"), []byte(cfg1), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, res := range []*AuditResult{
+		RunPreflightAudit(tempDir),
+		RunStagedAudit(tempDir, []string{"app.go", "dataset.dat"}),
+	} {
+		var foundLarge, foundTodoErr, foundAbsWarn bool
+		for _, v := range res.Violations {
+			if v.Category == "大文件拦截" && v.File == "dataset.dat" && v.Level == "ERROR" {
+				foundLarge = true
+			}
+			if v.Category == "代码洁癖-TODO占位符" && v.File == "app.go" && v.Level == "ERROR" {
+				foundTodoErr = true
+			}
+			if v.Category == "机器绝对路径泄露" && v.File == "app.go" && v.Level == "WARN" {
+				foundAbsWarn = true
+			}
+		}
+		if !foundLarge || !foundTodoErr || !foundAbsWarn {
+			t.Fatalf("策略 1 未按预期生效: foundLarge=%v foundTodoErr=%v foundAbsWarn=%v violations=%+v",
+				foundLarge, foundTodoErr, foundAbsWarn, res.Violations)
+		}
+	}
+
+	// 场景 2: large_file_mb = 5, todo = "off", absolute_path = "off"
+	cfg2 := "[guard]\nlarge_file_mb = 5\ntodo = \"off\"\nabsolute_path = \"off\"\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".agate", "config.toml"), []byte(cfg2), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, res := range []*AuditResult{
+		RunPreflightAudit(tempDir),
+		RunStagedAudit(tempDir, []string{"app.go", "dataset.dat"}),
+	} {
+		if len(res.Violations) != 0 {
+			t.Fatalf("策略 2 (todo=off, absolute_path=off, large_file_mb=5) 预期无违规，实际: %+v", res.Violations)
+		}
+	}
+}

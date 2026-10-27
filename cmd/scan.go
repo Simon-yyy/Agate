@@ -29,6 +29,7 @@ var scanCmd = &cobra.Command{
 - 识别技术栈（Maven/Spring Boot、npm/前端框架、Go、Python等）；
 - 检索端口配置（server.port、vite port、.env 等）；
 - 输出架构拓扑报告，支持通过 --write 自动丰富 MAP.md 与 contexts/context.md。`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("=== [agate scan] 正在深度扫描工程技术拓扑 ===")
 
@@ -115,7 +116,7 @@ func scanProject() *ProjectTopology {
 				subPath := filepath.Join(entry.Name(), cand)
 				if _, err := os.Stat(subPath); err == nil {
 					if port := extractPortFromFile(subPath, portRegex); port != "" {
-						topo.PortInfo[subPath] = "端口 " + port
+						topo.PortInfo[filepath.ToSlash(subPath)] = "端口 " + port
 					}
 				}
 			}
@@ -190,7 +191,7 @@ func appendTopologyToAgents(topo *ProjectTopology) error {
 
 	var finalContent string
 	if startIdx := strings.Index(original, startTag); startIdx != -1 {
-		if endIdx := strings.Index(original, endTag); endIdx != -1 {
+		if endIdx := strings.Index(original, endTag); endIdx > startIdx {
 			finalContent = original[:startIdx] + strings.TrimSpace(sb.String()) + original[endIdx+len(endTag):]
 		} else {
 			finalContent = original + sb.String()
@@ -199,7 +200,7 @@ func appendTopologyToAgents(topo *ProjectTopology) error {
 		finalContent = original + sb.String()
 	}
 
-	if err := os.WriteFile(agentsFile, []byte(finalContent), 0644); err != nil {
+	if err := harness.WriteFileAtomic(agentsFile, []byte(finalContent), 0644); err != nil {
 		return fmt.Errorf("写入 MAP.md 失败: %w", err)
 	}
 
@@ -248,7 +249,7 @@ func appendTopologyToContext(topo *ProjectTopology) error {
 
 	var finalContent string
 	if startIdx := strings.Index(original, startTag); startIdx != -1 {
-		if endIdx := strings.Index(original, endTag); endIdx != -1 {
+		if endIdx := strings.Index(original, endTag); endIdx > startIdx {
 			finalContent = original[:startIdx] + strings.TrimSpace(sb.String()) + original[endIdx+len(endTag):]
 		} else {
 			finalContent = original + sb.String()
@@ -257,7 +258,7 @@ func appendTopologyToContext(topo *ProjectTopology) error {
 		finalContent = original + sb.String()
 	}
 
-	if err := os.WriteFile(contextFile, []byte(finalContent), 0644); err != nil {
+	if err := harness.WriteFileAtomic(contextFile, []byte(finalContent), 0644); err != nil {
 		return fmt.Errorf("写入 contexts/context.md 失败: %w", err)
 	}
 

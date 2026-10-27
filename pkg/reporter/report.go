@@ -35,19 +35,21 @@ type ReportData struct {
 	AuditResult    *guard.AuditResult
 	TestOutput     string
 	TestPassed     bool
+	TestExecuted   bool
 	IsStaged       bool
 	GitDiffLines   []DiffLine
 }
 
 // ReportOptions 导出选项
 type ReportOptions struct {
-	RootDir     string
-	OutputFile  string // 可选，若为空则自动输出至 .ai-memory/reviews/
-	Staged      bool
-	TestOutput  string
-	TestPassed  bool
-	Duration    string
-	AuditResult *guard.AuditResult
+	RootDir      string
+	OutputFile   string // 可选，若为空则自动输出至 .ai-memory/reviews/
+	Staged       bool
+	TestOutput   string
+	TestPassed   bool
+	TestExecuted bool
+	Duration     string
+	AuditResult  *guard.AuditResult
 }
 
 // ParseDiffLines 解析原始 git diff 文本为带类型的行流
@@ -82,6 +84,13 @@ func ParseDiffLines(rawDiff string) []DiffLine {
 
 // RenderHTML 编译模板生成最终的自包含 HTML 字符串
 func RenderHTML(data *ReportData) (string, error) {
+	if data == nil {
+		data = &ReportData{}
+	}
+	if data.AuditResult == nil {
+		data.AuditResult = &guard.AuditResult{}
+	}
+
 	tmpl, err := template.New("review").Parse(string(templates.ReviewHtmlTpl))
 	if err != nil {
 		return "", fmt.Errorf("解析 HTML 审查模板失败: %w", err)
@@ -143,8 +152,12 @@ func BuildReport(opts ReportOptions) (string, *ReportData, error) {
 	diffLines := ParseDiffLines(rawDiff)
 
 	// 5. 判定最终综合状态
+	overallPass := !auditResult.HasErrors()
+	if (opts.TestExecuted || opts.TestOutput != "") && !opts.TestPassed {
+		overallPass = false
+	}
 	status := "PASS"
-	if auditResult.HasErrors() || (!opts.TestPassed && opts.TestOutput != "") {
+	if !overallPass {
 		status = "FAIL"
 	}
 
@@ -165,6 +178,7 @@ func BuildReport(opts ReportOptions) (string, *ReportData, error) {
 		AuditResult:    auditResult,
 		TestOutput:     opts.TestOutput,
 		TestPassed:     opts.TestPassed,
+		TestExecuted:   opts.TestExecuted || opts.TestOutput != "",
 		IsStaged:       opts.Staged,
 		GitDiffLines:   diffLines,
 	}
@@ -200,6 +214,12 @@ func BuildReport(opts ReportOptions) (string, *ReportData, error) {
 
 // FindLatestReport 在指定的 .ai-memory/reviews 目录下查找最新生成的 HTML 报告
 func FindLatestReport(baseDir string) (string, error) {
+	if baseDir == "" {
+		baseDir = "."
+	}
+	if repoRoot, err := git.GetRepoRoot(baseDir); err == nil && repoRoot != "" {
+		baseDir = repoRoot
+	}
 	reviewsDir := filepath.Join(baseDir, ".ai-memory", "reviews")
 	entries, err := os.ReadDir(reviewsDir)
 	if err != nil {

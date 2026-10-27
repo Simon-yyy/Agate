@@ -21,6 +21,7 @@ var exportCmd = &cobra.Command{
 	Long: `将当前工程的阶段任务（TASK.md）、Phase 0 安全红线审计、
 自检测试物证及 Git Diff 变动编译为离线单文件 HTML 审查报告。
 默认安全输出至 .ai-memory/reviews/，受 Git 隐形隔离保护，团队零污染。`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		start := time.Now()
 		cmd.Println("\033[94m[agate export] 正在汇聚审计数据并编译自包含 HTML 报告...\033[0m")

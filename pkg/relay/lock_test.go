@@ -2,6 +2,7 @@ package relay
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -104,5 +105,66 @@ func TestAcquireLockAllowsOnlyOneConcurrentOwner(t *testing.T) {
 	}
 	if successes != 1 {
 		t.Fatalf("并发认领必须仅有一个成功，实际成功数: %d", successes)
+	}
+}
+
+func TestStaleTransitionGuardRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	guardPath := getLockTransitionPath(tmpDir)
+	if err := os.MkdirAll( tmpDir+"/.ai-memory/locks", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(guardPath, []byte("stale"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	staleTime := time.Now().Add(-2 * lockTransitionStaleAfter)
+	if err := os.Chtimes(guardPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := AcquireLock(tmpDir, "TASK-STALE", "agent-a", time.Hour, false)
+	if err != nil {
+		t.Fatalf("清理过期过渡锁并加锁失败: %v", err)
+	}
+	if lock.OwnerAgent != "agent-a" {
+		t.Fatalf("预期持有人为 agent-a，实际: %s", lock.OwnerAgent)
+	}
+	if err := ReleaseLock(tmpDir, "agent-a", false); err != nil {
+		t.Fatalf("释放锁失败: %v", err)
+	}
+}
+
+func TestSameAgentDifferentSessionIdConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Setenv("AGATE_SESSION_ID", "session-alpha")
+	lock, err := AcquireLock(tmpDir, "TASK-SESSION", "codex", time.Hour, false)
+	if err != nil {
+		t.Fatalf("会话 alpha 加锁失败: %v", err)
+	}
+	if lock.SessionId != "session-alpha" {
+		t.Fatalf("预期 SessionId=session-alpha，实际: %s", lock.SessionId)
+	}
+
+	// 同一会话可正常续约
+	if _, err := AcquireLock(tmpDir, "TASK-SESSION", "codex", time.Hour, false); err != nil {
+		t.Fatalf("同一会话续约应成功，实际报错: %v", err)
+	}
+
+	// 切换至同一工具的另一会话 session-beta，不带 force 应被拒绝加锁和释放锁
+	t.Setenv("AGATE_SESSION_ID", "")
+	t.Setenv("CODEX_SESSION_ID", "session-beta")
+	if _, err := AcquireLock(tmpDir, "TASK-SESSION", "codex", time.Hour, false); err == nil {
+		t.Fatal("同一工具不同会话未带 --force 抢锁应被拒绝")
+	}
+	if err := ReleaseLock(tmpDir, "codex", false); err == nil {
+		t.Fatal("同一工具不同会话未带 --force 释放锁应被拒绝")
+	}
+
+	// 切回原会话 session-alpha 可正常释放
+	t.Setenv("CODEX_SESSION_ID", "")
+	t.Setenv("AGATE_SESSION_ID", "session-alpha")
+	if err := ReleaseLock(tmpDir, "codex", false); err != nil {
+		t.Fatalf("原持有会话释放锁失败: %v", err)
 	}
 }

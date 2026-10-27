@@ -11,11 +11,21 @@ import (
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "管理本地 Git 门禁钩子（pre-commit 提纯自检 + pre-push 防偷跑物理阻断）",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		return &UsageError{Err: fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())}
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var hookInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "安装本地 Git 物理双门禁（pre-commit 验证 + pre-push 阻断）",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := git.InstallHooks(); err != nil {
 			return fmt.Errorf("挂载钩子失败: %w", err)
@@ -30,6 +40,7 @@ var hookInstallCmd = &cobra.Command{
 var hookUninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "卸载并移除本地 core.hooksPath 与物理钩子",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := git.UninstallHooks(); err != nil {
 			return fmt.Errorf("卸载钩子失败: %w", err)
@@ -42,6 +53,7 @@ var hookUninstallCmd = &cobra.Command{
 var hookStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "查看当前 Git 仓库本地门禁挂载状态",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		status, err := git.GetHookStatus()
 		if err != nil {

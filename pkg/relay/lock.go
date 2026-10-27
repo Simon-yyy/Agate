@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"agate/pkg/harness"
@@ -20,8 +21,26 @@ const lockTransitionStaleAfter = 30 * time.Second
 type TaskLock struct {
 	TaskId     string    `json:"task_id"`
 	OwnerAgent string    `json:"owner_agent"`
+	Role       string    `json:"role,omitempty"`
+	SessionId  string    `json:"session_id,omitempty"`
 	AcquiredAt time.Time `json:"acquired_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// DetectCurrentSessionId 探测当前终端或 Agent 会话唯一标识，用于同工具多会话并发隔离
+func DetectCurrentSessionId() string {
+	for _, key := range []string{
+		"AGATE_SESSION_ID",
+		"CODEX_SESSION_ID",
+		"CODEX_THREAD_ID",
+		"TERM_SESSION_ID",
+		"WT_SESSION",
+	} {
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+			return val
+		}
+	}
+	return ""
 }
 
 // IsExpired 检查租约是否已过期
@@ -63,7 +82,10 @@ func acquireLockTransitionGuard(rootDir string) (func(), error) {
 		}
 
 		if info, statErr := os.Stat(guardPath); statErr == nil && time.Since(info.ModTime()) > lockTransitionStaleAfter {
-			_ = os.Remove(guardPath)
+			stalePath := fmt.Sprintf("%s.stale.%d", guardPath, time.Now().UnixNano())
+			if renameErr := os.Rename(guardPath, stalePath); renameErr == nil {
+				_ = os.Remove(stalePath)
+			}
 			continue
 		}
 		if time.Now().After(deadline) {
@@ -95,6 +117,11 @@ func ReadLock(rootDir string) (*TaskLock, error) {
 
 // AcquireLock 抢占或续约任务租约锁
 func AcquireLock(rootDir string, taskId, agent string, lease time.Duration, force bool) (*TaskLock, error) {
+	return AcquireLockWithRole(rootDir, taskId, agent, "", lease, force)
+}
+
+// AcquireLockWithRole 抢占或续约带角色标识的任务租约锁
+func AcquireLockWithRole(rootDir string, taskId, agent, role string, lease time.Duration, force bool) (*TaskLock, error) {
 	if lease == 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -109,18 +136,29 @@ func AcquireLock(rootDir string, taskId, agent string, lease time.Duration, forc
 		return nil, err
 	}
 
+	currentSessionId := DetectCurrentSessionId()
 	now := time.Now()
-	if currentLock != nil && !currentLock.IsExpired() {
-		// 锁被其他人持有且未超时
-		if currentLock.OwnerAgent != agent && !force {
+	if currentLock != nil && !currentLock.IsExpired() && !force {
+		if currentLock.OwnerAgent != agent {
 			return nil, fmt.Errorf("任务当前正被 [%s] 锁定施工 (租约至 %s)。请等待其交接或使用 --force 强制认领",
 				currentLock.OwnerAgent, currentLock.ExpiresAt.Format("15:04:05"))
 		}
+		if currentLock.SessionId != "" && currentSessionId != "" && currentLock.SessionId != currentSessionId {
+			return nil, fmt.Errorf("任务当前正被同一工具 [%s] 的另一会话 (%s) 锁定施工，请等待其交接或使用 --force",
+				currentLock.OwnerAgent, currentLock.SessionId)
+		}
+	}
+
+	effectiveRole := strings.TrimSpace(role)
+	if effectiveRole == "" && currentLock != nil && currentLock.OwnerAgent == agent {
+		effectiveRole = currentLock.Role
 	}
 
 	newLock := &TaskLock{
 		TaskId:     taskId,
 		OwnerAgent: agent,
+		Role:       effectiveRole,
+		SessionId:  currentSessionId,
 		AcquiredAt: now,
 		ExpiresAt:  now.Add(lease),
 	}
@@ -144,6 +182,12 @@ func AcquireLock(rootDir string, taskId, agent string, lease time.Duration, forc
 
 // ReleaseLock 释放任务租约锁
 func ReleaseLock(rootDir string, agent string, force bool) error {
+	releaseGuard, err := acquireLockTransitionGuard(rootDir)
+	if err != nil {
+		return err
+	}
+	defer releaseGuard()
+
 	lock, err := ReadLock(rootDir)
 	if err != nil {
 		return err
@@ -152,8 +196,15 @@ func ReleaseLock(rootDir string, agent string, force bool) error {
 		return nil // 无锁可释
 	}
 
-	if lock.OwnerAgent != agent && !force && !lock.IsExpired() {
-		return fmt.Errorf("无权释放由 [%s] 持有的任务锁 (请使用 --force 强制释放)", lock.OwnerAgent)
+	if !force && !lock.IsExpired() {
+		if lock.OwnerAgent != agent {
+			return fmt.Errorf("无权释放由 [%s] 持有的任务锁 (请使用 --force 强制释放)", lock.OwnerAgent)
+		}
+		currentSessionId := DetectCurrentSessionId()
+		if lock.SessionId != "" && currentSessionId != "" && lock.SessionId != currentSessionId {
+			return fmt.Errorf("任务当前正被同一工具 [%s] 的另一会话 (%s) 锁定施工，请等待其交接或使用 --force",
+				lock.OwnerAgent, lock.SessionId)
+		}
 	}
 
 	lockPath := GetLockPath(rootDir)

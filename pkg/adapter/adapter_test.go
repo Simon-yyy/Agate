@@ -33,7 +33,7 @@ func TestDistributeRules(t *testing.T) {
 			t.Errorf("目标规则文件未生成 [%s]: %v", destPath, err)
 			continue
 		}
-		if string(data) != string(customRule) {
+		if !strings.Contains(string(data), string(customRule)) || !strings.Contains(string(data), "-rules:start -->") {
 			t.Errorf("目标规则文件内容不一致 [%s]", destPath)
 		}
 	}
@@ -73,10 +73,10 @@ func TestResolveTargets(t *testing.T) {
 		t.Errorf("指定 all 预期包含 5 个目标及 codex，得到: %v, err: %v", resAll, err)
 	}
 
-	// 3. 空白目录默认推荐 2 个主流目标
+	// 3. 无法识别的空白目录要求用户显式选择，避免猜测工具。
 	resDefault, err := ResolveTargets(nil, tempDir)
-	if err != nil || len(resDefault) != 2 {
-		t.Errorf("空白目录预期默认 2 个目标，得到: %v, err: %v", resDefault, err)
+	if err == nil || len(resDefault) != 0 {
+		t.Errorf("空白目录预期拒绝猜测目标，得到: %v, err: %v", resDefault, err)
 	}
 
 	// 4. 嗅探已存在环境 (.cursorrules)
@@ -160,7 +160,7 @@ func containsAll(value string, parts []string) bool {
 	return true
 }
 
-func TestDistributeRulesBackupProtection(t *testing.T) {
+func TestDistributeRulesPreservesUserContentAndBackups(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "agate-backup-test-*")
 	if err != nil {
 		t.Fatalf("创建临时目录失败: %v", err)
@@ -177,6 +177,10 @@ func TestDistributeRulesBackupProtection(t *testing.T) {
 	if err := os.WriteFile(targetFile, originalUserRules, 0644); err != nil {
 		t.Fatalf("预写用户规约失败: %v", err)
 	}
+	backupPath := targetFile + ".agate.bak"
+	if err := os.WriteFile(backupPath, []byte("旧版恢复物证"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// 执行分发新的规约
 	newRules := []byte("# Agate Managed Skill Rules")
@@ -184,20 +188,19 @@ func TestDistributeRulesBackupProtection(t *testing.T) {
 		t.Fatalf("DistributeRules 执行失败: %v", err)
 	}
 
-	// 1. 验证目标文件已更新为新规则
+	// 用户正文保持生效，新正文只写入受管区块。
 	newData, err := os.ReadFile(targetFile)
-	if err != nil || string(newData) != string(newRules) {
-		t.Errorf("目标文件未正确更新为新规则")
+	if err != nil || !strings.HasPrefix(string(newData), string(originalUserRules)) || !strings.Contains(string(newData), string(newRules)) {
+		t.Errorf("目标文件未保留用户正文及受管规则")
 	}
 
 	// 2. 验证备份文件 .cursorrules.agate.bak 存在且完整保留了用户原始规则
-	backupPath := targetFile + ".agate.bak"
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		t.Fatalf("预期存在备份文件 %s，但读取失败: %v", backupPath, err)
 	}
-	if string(backupData) != string(originalUserRules) {
-		t.Errorf("备份文件内容不匹配，预期: %s, 实际: %s", string(originalUserRules), string(backupData))
+	if string(backupData) != "旧版恢复物证" {
+		t.Errorf("初始化修改了原有恢复物证")
 	}
 }
 
@@ -251,4 +254,3 @@ func TestCheckDeprecatedRulePatterns(t *testing.T) {
 		t.Errorf("陈旧规约预期 2 条警告，实际得到 %d 条: %v", len(warnings), warnings)
 	}
 }
-

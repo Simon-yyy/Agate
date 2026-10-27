@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"agate/pkg/config"
+	"agate/pkg/git"
+	"agate/pkg/guard"
 	"agate/pkg/relay"
 
 	"github.com/spf13/cobra"
@@ -13,6 +16,8 @@ var (
 	flagTaskAgent      string
 	flagTaskForce      bool
 	flagTaskNextAgent  string
+	flagTaskRole       string
+	flagTaskNextRole   string
 	flagTaskNote       string
 	flagTaskSkipVerify bool
 )
@@ -36,6 +41,7 @@ var taskCmd = &cobra.Command{
 var taskStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "查看当前任务看板状态、持锁人与交付物证",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		res, err := relay.GetTaskStatus(".")
 		if err != nil {
@@ -56,6 +62,20 @@ var taskStatusCmd = &cobra.Command{
 		}
 		cmd.Printf("  当前状态: %s[%s]\033[0m\n", statusColor, res.Manifest.Status)
 		cmd.Printf("  当前执行: %s | 指定接棒: %s\n", res.Manifest.CurrentAgent, res.Manifest.NextAgent)
+		curRole := res.Manifest.CurrentRole
+		if curRole == "" {
+			curRole = "none"
+		}
+		nextRole := res.Manifest.NextRole
+		if nextRole == "" {
+			nextRole = "any"
+		}
+		cmd.Printf("  当前角色: %s | 下一接棒角色: %s\n", curRole, nextRole)
+		digest := res.Manifest.SnapshotDigest
+		if digest == "" {
+			digest = "none"
+		}
+		cmd.Printf("  快照指纹: %s\n", digest)
 		cmd.Printf("  更新时间: %s\n", res.Manifest.UpdatedAt)
 
 		if res.Lock != nil {
@@ -92,20 +112,25 @@ var taskStatusCmd = &cobra.Command{
 var taskClaimCmd = &cobra.Command{
 	Use:   "claim",
 	Short: "认领任务并抢占租约互斥锁",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		workDir := "."
+		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
+			workDir = repoRoot
+		}
 		agent := flagTaskAgent
 		if agent == "" {
-			agent = relay.DetectCurrentAgent(".")
+			agent = relay.DetectCurrentAgent(workDir)
 		}
 
-		manifest, lock, err := relay.ClaimTask(".", agent, flagTaskForce)
+		manifest, lock, err := relay.ClaimTaskWithRole(workDir, agent, flagTaskRole, flagTaskForce)
 		if err != nil {
 			return fmt.Errorf("认领任务失败: %w", err)
 		}
 
 		cmd.Printf("\033[92m[+] 任务认领成功！\033[0m\n")
 		cmd.Printf("  任务编号: %s (%s)\n", manifest.TaskId, manifest.Title)
-		cmd.Printf("  当前执行者: \033[1m%s\033[0m\n", agent)
+		cmd.Printf("  当前执行者: \033[1m%s\033[0m (角色: %s)\n", agent, manifest.CurrentRole)
 		cmd.Printf("  租约锁已生效至: \033[93m%s\033[0m (防多 Agent 冲突)\n", lock.ExpiresAt.Format("15:04:05"))
 		return nil
 	},
@@ -114,10 +139,27 @@ var taskClaimCmd = &cobra.Command{
 var taskHandoverCmd = &cobra.Command{
 	Use:   "handover",
 	Short: "执行安全自检、编译 HTML 物证并流转至交接就绪状态",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		workDir := "."
+		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
+			workDir = repoRoot
+		}
+		cfg, _, cfgErr := config.Load(workDir)
+		if cfgErr != nil {
+			return cfgErr
+		}
+
+		if _, err := relay.NormalizeRole(flagTaskRole); err != nil {
+			return err
+		}
+		if _, err := relay.NormalizeRole(flagTaskNextRole); err != nil {
+			return err
+		}
+
 		agent := flagTaskAgent
 		if agent == "" {
-			agent = relay.DetectCurrentAgent(".")
+			agent = relay.DetectCurrentAgent(workDir)
 		}
 
 		cmd.Printf("\033[94m[agate task] [%s] 正在准备交接并编译可核验物证...\033[0m\n", agent)
@@ -125,9 +167,21 @@ var taskHandoverCmd = &cobra.Command{
 		var testPassed = true
 		var testOutput = ""
 		if !flagTaskSkipVerify {
+			if verifyFailureStreak(workDir) >= 2 {
+				return fmt.Errorf("两振熔断已开启：请由人类确认修复后使用 agate verify --resume-after-break 恢复自检")
+			}
 			cmd.Printf("  [1/2] 调度动态自检套件与安全门禁...\n")
-			passed, summary, err := runDynamicTests(".", false)
+			auditResult := guard.RunPreflightAudit(workDir)
+			if auditResult.HasErrors() {
+				auditResult.PrintReport()
+				streak := recordVerifyFailure(workDir)
+				printCircuitBreakerWarning(cmd.OutOrStdout(), streak)
+				return fmt.Errorf("交接拒绝: Phase 0 门禁自检未通过，发现 %d 处阻断违规项", len(auditResult.Violations))
+			}
+			passed, summary, err := runDynamicTests(workDir, cfg.Guard.Strict)
 			if err != nil || !passed {
+				streak := recordVerifyFailure(workDir)
+				printCircuitBreakerWarning(cmd.OutOrStdout(), streak)
 				return fmt.Errorf("交接拒绝: 动态自检未通过 (%s)", summary)
 			}
 			testPassed = passed
@@ -137,9 +191,11 @@ var taskHandoverCmd = &cobra.Command{
 		}
 
 		manifest, reportPath, err := relay.HandoverTask(relay.HandoverOptions{
-			RootDir:      ".",
+			RootDir:      workDir,
 			CurrentAgent: agent,
 			NextAgent:    flagTaskNextAgent,
+			CurrentRole:  flagTaskRole,
+			NextRole:     flagTaskNextRole,
 			Note:         flagTaskNote,
 			SkipVerify:   flagTaskSkipVerify,
 			Force:        flagTaskForce,
@@ -149,9 +205,12 @@ var taskHandoverCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("任务交接失败: %w", err)
 		}
+		if !flagTaskSkipVerify {
+			recordVerifySuccess(workDir)
+		}
 
 		cmd.Printf("  \033[92m[✓] 任务交接就绪！状态已流转为 [HANDOVER_READY]\033[0m\n")
-		cmd.Printf("  指定接棒目标: \033[1m%s\033[0m\n", manifest.NextAgent)
+		cmd.Printf("  指定接棒目标: \033[1m%s\033[0m (角色: %s -> %s)\n", manifest.NextAgent, manifest.CurrentRole, manifest.NextRole)
 		cmd.Printf("  可核验证明单: \033[94m%s\033[0m\n", reportPath)
 		cmd.Printf("  租约锁已释放，请切换至接棒工具执行 \033[93magate task resume\033[0m\n")
 		return nil
@@ -161,22 +220,30 @@ var taskHandoverCmd = &cobra.Command{
 var taskResumeCmd = &cobra.Command{
 	Use:   "resume",
 	Short: "新 Agent 唤醒接棒，提取前序断点与接力四要素",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		workDir := "."
+		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
+			workDir = repoRoot
+		}
 		agent := flagTaskAgent
 		if agent == "" {
-			agent = relay.DetectCurrentAgent(".")
+			agent = relay.DetectCurrentAgent(workDir)
 		}
 
-		res, err := relay.ResumeTask(".", agent)
+		res, err := relay.ResumeTaskWithRole(workDir, agent, flagTaskRole)
 		if err != nil {
 			return fmt.Errorf("接棒失败: %w", err)
 		}
 
 		cmd.Printf("\033[92m=== [agate task] 成功接棒任务: %s ===\033[0m\n", res.Manifest.TaskId)
 		cmd.Printf("  任务标题: %s\n", res.Manifest.Title)
-		cmd.Printf("  接棒执行者: \033[1m%s\033[0m (状态已流转为 IN_PROGRESS)\n", agent)
+		cmd.Printf("  接棒执行者: \033[1m%s\033[0m (角色: %s, 状态已流转为 IN_PROGRESS)\n", agent, res.Manifest.CurrentRole)
 		if res.ReceiptHTML != "none" && res.ReceiptHTML != "" {
 			cmd.Printf("  前任物证凭单: \033[94m%s\033[0m\n", res.ReceiptHTML)
+		}
+		for _, w := range res.Warnings {
+			cmd.Printf("  \033[93m[!] 告警: %s\033[0m\n", w)
 		}
 
 		cmd.Println("\n\033[1m📋 接力四要素感知基线 (Handover Quartet):\033[0m")
@@ -201,10 +268,24 @@ var taskResumeCmd = &cobra.Command{
 var taskDoneCmd = &cobra.Command{
 	Use:   "done",
 	Short: "完成任务交付，执行全量门禁自检，流转至 [DONE] 终态并释放锁",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		workDir := "."
+		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
+			workDir = repoRoot
+		}
+		cfg, _, cfgErr := config.Load(workDir)
+		if cfgErr != nil {
+			return cfgErr
+		}
+
+		if _, err := relay.NormalizeRole(flagTaskRole); err != nil {
+			return err
+		}
+
 		agent := flagTaskAgent
 		if agent == "" {
-			agent = relay.DetectCurrentAgent(".")
+			agent = relay.DetectCurrentAgent(workDir)
 		}
 
 		cmd.Printf("\033[94m[agate task] [%s] 正在执行任务终态自检与归档...\033[0m\n", agent)
@@ -212,9 +293,21 @@ var taskDoneCmd = &cobra.Command{
 		var testPassed = true
 		var testOutput = ""
 		if !flagTaskSkipVerify {
+			if verifyFailureStreak(workDir) >= 2 {
+				return fmt.Errorf("两振熔断已开启：请由人类确认修复后使用 agate verify --resume-after-break 恢复自检")
+			}
 			cmd.Printf("  [1/2] 调度终态动态测试套件与安全门禁...\n")
-			passed, summary, err := runDynamicTests(".", false)
+			auditResult := guard.RunPreflightAudit(workDir)
+			if auditResult.HasErrors() {
+				auditResult.PrintReport()
+				streak := recordVerifyFailure(workDir)
+				printCircuitBreakerWarning(cmd.OutOrStdout(), streak)
+				return fmt.Errorf("交付被拒绝: Phase 0 门禁自检未通过，发现 %d 处阻断违规项", len(auditResult.Violations))
+			}
+			passed, summary, err := runDynamicTests(workDir, cfg.Guard.Strict)
 			if err != nil || !passed {
+				streak := recordVerifyFailure(workDir)
+				printCircuitBreakerWarning(cmd.OutOrStdout(), streak)
 				return fmt.Errorf("交付被拒绝: 动态自检未通过 (%s)", summary)
 			}
 			testPassed = passed
@@ -224,8 +317,9 @@ var taskDoneCmd = &cobra.Command{
 		}
 
 		manifest, reportPath, err := relay.DoneTask(relay.HandoverOptions{
-			RootDir:      ".",
+			RootDir:      workDir,
 			CurrentAgent: agent,
+			CurrentRole:  flagTaskRole,
 			Note:         flagTaskNote,
 			SkipVerify:   flagTaskSkipVerify,
 			Force:        flagTaskForce,
@@ -234,6 +328,9 @@ var taskDoneCmd = &cobra.Command{
 		})
 		if err != nil {
 			return fmt.Errorf("任务归档失败: %w", err)
+		}
+		if !flagTaskSkipVerify {
+			recordVerifySuccess(workDir)
 		}
 
 		cmd.Printf("  \033[92m[✓] 任务已终态交付！状态流转为 [DONE]\033[0m\n")
@@ -246,20 +343,25 @@ var taskDoneCmd = &cobra.Command{
 
 func init() {
 	taskClaimCmd.Flags().StringVarP(&flagTaskAgent, "agent", "a", "", "指定当前执行认领的 Agent 名称 (默认智能推断)")
+	taskClaimCmd.Flags().StringVarP(&flagTaskRole, "role", "r", "", "指定当前认领的任务角色 (dev/test/ops)")
 	taskClaimCmd.Flags().BoolVarP(&flagTaskForce, "force", "f", false, "强制认领并覆盖现有租约锁")
 
 	taskHandoverCmd.Flags().StringVarP(&flagTaskAgent, "agent", "a", "", "指定当前交接的 Agent 名称 (默认智能推断)")
 	taskHandoverCmd.Flags().StringVarP(&flagTaskNextAgent, "to", "t", "any", "指定接棒 Agent 工具 (默认 any)")
+	taskHandoverCmd.Flags().StringVar(&flagTaskRole, "role", "", "指定当前交接方角色 (dev/test/ops)")
+	taskHandoverCmd.Flags().StringVar(&flagTaskNextRole, "next-role", "", "指定下一接棒方角色 (dev/test/ops/any)")
 	taskHandoverCmd.Flags().StringVarP(&flagTaskNote, "note", "n", "", "附加交接备忘或下一步建议批注")
 	taskHandoverCmd.Flags().BoolVar(&flagTaskSkipVerify, "skip-verify", false, "跳过交接前门禁自检 (应急模式)")
 	taskHandoverCmd.Flags().BoolVarP(&flagTaskForce, "force", "f", false, "强制释放他人持有的锁")
 
 	taskDoneCmd.Flags().StringVarP(&flagTaskAgent, "agent", "a", "", "指定当前执行交付的 Agent 名称 (默认智能推断)")
+	taskDoneCmd.Flags().StringVarP(&flagTaskRole, "role", "r", "", "指定执行交付归档的角色 (dev/test/ops)")
 	taskDoneCmd.Flags().StringVarP(&flagTaskNote, "note", "n", "", "附加交付备忘或完成说明")
 	taskDoneCmd.Flags().BoolVar(&flagTaskSkipVerify, "skip-verify", false, "跳过最终自检 (应急模式)")
 	taskDoneCmd.Flags().BoolVarP(&flagTaskForce, "force", "f", false, "强制释放并完成他人持有的任务")
 
 	taskResumeCmd.Flags().StringVarP(&flagTaskAgent, "agent", "a", "", "指定接棒的 Agent 名称 (默认智能推断)")
+	taskResumeCmd.Flags().StringVarP(&flagTaskRole, "role", "r", "", "指定接棒角色 (dev/test/ops，默认继承任务指定角色)")
 
 	taskCmd.AddCommand(taskStatusCmd)
 	taskCmd.AddCommand(taskClaimCmd)
