@@ -223,3 +223,61 @@ version = "1.0"
 		t.Errorf(".git/info/exclude 未包含未跟踪的 AGENTS.md:\n%s", excludeText)
 	}
 }
+
+func TestInitConflictBlocksExistingEntryFallback(t *testing.T) {
+	root := t.TempDir()
+	cmdGit := exec.Command("git", "init", root)
+	if err := cmdGit.Run(); err != nil {
+		t.Fatalf("git init 失败: %v", err)
+	}
+
+	// 创建已有的 .cursorrules
+	_ = os.WriteFile(filepath.Join(root, ".cursorrules"), []byte("cursor rules"), 0644)
+
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(root)
+	defer os.Chdir(origWd)
+
+	// R2-S03: 隔离外部宿主机全局配置与家目录，杜绝机器环境污染断言
+	emptyGlobal := filepath.Join(root, "empty_global.toml")
+	_ = os.WriteFile(emptyGlobal, []byte(""), 0644)
+	t.Setenv("AGATE_GLOBAL_CONFIG", emptyGlobal)
+
+	// 注入同级冲突强指纹
+	t.Setenv("CODEX_SESSION_ID", "1")
+	t.Setenv("CLAUDE_CODE", "1")
+
+	// 1. 无有效目标且有冲突，禁止已有入口兜底
+	cmd := newInitCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--no-hook"})
+
+	err := cmd.Execute()
+	// RD-F01 必须严格阻断并报错，严禁回退装配已有规则
+	if err == nil {
+		t.Fatalf("存在身份冲突时 init 预期报错阻断，实际返回成功\n输出:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "冲突") {
+		t.Errorf("错误信息预期包含'冲突'，实际为: %v", err)
+	}
+
+	// 2. R2-F01: 传入纯空白目标时，必须立即报错，禁止跳过冲突门禁
+	cmdBlank := newInitCommand()
+	cmdBlank.SetArgs([]string{"--no-hook", "-t", "   "})
+	errBlank := cmdBlank.Execute()
+	if errBlank == nil || !strings.Contains(errBlank.Error(), "不能为空白字符") {
+		t.Fatalf("传入纯空白 -t 时预期报错拦截，实际为: %v", errBlank)
+	}
+
+	// 3. R2-F01: 配置 targets = [""] 时，无有效目标且有冲突，禁止已有入口兜底
+	_ = os.MkdirAll(filepath.Join(root, ".agate"), 0755)
+	_ = os.WriteFile(filepath.Join(root, ".agate", "config.toml"), []byte("[agent]\ntargets = [\"   \"]\n"), 0644)
+	cmdConfigBlank := newInitCommand()
+	cmdConfigBlank.SetArgs([]string{"--no-hook"})
+	errConfigBlank := cmdConfigBlank.Execute()
+	if errConfigBlank == nil || !strings.Contains(errConfigBlank.Error(), "冲突") {
+		t.Fatalf("配置纯空白 targets 且有冲突时预期阻断报错，实际为: %v", errConfigBlank)
+	}
+}

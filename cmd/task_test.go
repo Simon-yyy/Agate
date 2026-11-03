@@ -377,3 +377,25 @@ func TestTaskCmdMultiRoleLifecycleAndMismatchBlock(t *testing.T) {
 	}
 }
 
+func TestTaskCmdRejectsWhitespaceAgent(t *testing.T) {
+	// R6-02: 显式传入空白 --agent 必须立即报错拦截，严禁静默 fallback 或在 handover/done 中浪费耗时自检
+	tempDir, cleanup := initTaskTestRepo(t)
+	defer cleanup()
+
+	for _, subcmd := range []string{"claim", "resume", "handover", "done"} {
+		var buf bytes.Buffer
+		rootCmd.SetOut(&buf)
+		rootCmd.SetErr(&buf)
+		flagTaskAgent = ""
+		rootCmd.SetArgs([]string{"task", subcmd, "--agent", "   "})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatalf("task %s 显式传入空白 --agent 时预期报错拦截，实际成功", subcmd)
+		}
+		if !strings.Contains(err.Error(), "不能为空白字符串") {
+			t.Fatalf("task %s 预期包含空白参数报错，实际: %v", subcmd, err)
+		}
+	}
+	_ = tempDir
+}
+

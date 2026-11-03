@@ -11,10 +11,17 @@ import (
 
 func clearAgentEnvForTest(t *testing.T) {
 	t.Helper()
+	// R5-05: 重置 detect 命令全局布尔 Flag，杜绝跨用例状态污染
+	flagDetectExplain = false
+	flagDetectJSON = false
+
 	for _, key := range []string{
 		"CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_VERSION", "CODEX_CI", "CODEX_SHELL",
 		"CURSOR_AGENT", "CURSOR_VERSION", "ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE",
 		"CLAUDE_CODE", "CLAUDE_AGENT", "WINDSURF_AGENT", "TERM_PROGRAM", "VSCODE_GIT_IPC_HANDLE",
+		"AGATE_SESSION_CONTEXT", "AGATE_SESSION_ID", "TERM_SESSION_ID",
+		"VSCODE_GIT_ASKPASS_NODE", "VSCODE_IPC_HOOK_CLI", "APPLICATION_INSIGHTS_NO_DIAGNOSTIC_CHANNEL",
+		"AGATE_GLOBAL_CONFIG",
 	} {
 		t.Setenv(key, "")
 	}

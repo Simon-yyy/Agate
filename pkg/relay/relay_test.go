@@ -117,17 +117,24 @@ func TestDetectCurrentAgentPrecision(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("VSCODE_GIT_IPC_HANDLE", "")
 
-	// 1. 独占 .cursorrules 目录
+	// 1. 仅有独占 .cursorrules 目录但现场无任何环境变量指纹时，严格返回空字符串（RD-F02 闭环）
 	_ = os.WriteFile(filepath.Join(tempDir, ".cursorrules"), []byte("cursor"), 0644)
-	if a := DetectCurrentAgent(tempDir); a != "cursor" {
-		t.Errorf("独占 .cursorrules 预期推断为 cursor，实际为: %s", a)
+	if a := DetectCurrentAgent(tempDir); a != "" {
+		t.Errorf("无环境变量指纹时严禁凭 .cursorrules 推断当前调用者，预期为空，实际为: %s", a)
 	}
 
-	// 2. 环境变量优先判定
+	// 2. R2-F02 闭环：仅有宿主终端标识 (TERM_PROGRAM=cursor) 时严禁无条件升级为任务执行者，必须返回空
 	t.Setenv("TERM_PROGRAM", "cursor")
-	if a := DetectCurrentAgent(tempDir); a != "cursor" {
-		t.Errorf("TERM_PROGRAM=cursor 预期推断为 cursor，实际为: %s", a)
+	if a := DetectCurrentAgent(tempDir); a != "" {
+		t.Errorf("仅有宿主终端 TERM_PROGRAM=cursor 时严禁升级为任务调用者，预期为空，实际为: %s", a)
 	}
+
+	// 3. 具备确凿现场 Agent 强指纹时精准识别 (如 CURSOR_AGENT=true 或 CLAUDE_CODE=1)
+	t.Setenv("CURSOR_AGENT", "1")
+	if a := DetectCurrentAgent(tempDir); a != "cursor" {
+		t.Errorf("现场具备 CURSOR_AGENT 强指纹时预期推断为 cursor，实际为: %s", a)
+	}
+	t.Setenv("CURSOR_AGENT", "")
 
 	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("CLAUDE_CODE", "1")
@@ -397,32 +404,33 @@ func TestRelaySameAgentDifferentSessionAndSnapshotExpirationWarning(t *testing.T
 	}
 }
 
-func TestDetectCurrentAgentCodexAndConfigFallback(t *testing.T) {
+func TestDetectCurrentAgentStrictNoFallback(t *testing.T) {
 	for _, key := range []string{
 		"ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE",
 		"CURSOR_AGENT", "CURSOR_VERSION", "CLAUDE_CODE", "CLAUDE_AGENT",
 		"WINDSURF_AGENT", "CODEX_SESSION_ID", "CODEX_THREAD_ID",
 		"CODEX_VERSION", "CODEX_CI", "CODEX_SHELL", "TERM_PROGRAM", "VSCODE_GIT_IPC_HANDLE",
+		"AGATE_SESSION_CONTEXT",
 	} {
 		t.Setenv(key, "")
 	}
 
 	root := t.TempDir()
-	// 1. 仅存在受管 AGENTS.md 时识别为 codex
+	// 1. 仅存在受管 AGENTS.md，但现场无指纹时，严格返回空字符串（RD-F02: 严禁由规则文件推断调用者）
 	_ = os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("<!-- agate:codex-rules:start -->\n<!-- agate:codex-rules:end -->\n"), 0644)
-	if got := DetectCurrentAgent(root); got != "codex" {
-		t.Fatalf("仅存在受管 AGENTS.md 时预期识别为 codex，实际: %s", got)
+	if got := DetectCurrentAgent(root); got != "" {
+		t.Fatalf("无现场指纹时严禁由规则文件推断调用者，预期返回空，实际: %s", got)
 	}
 
-	// 2. 多入口并存时回退读取 .agate/config.toml 唯一 target
+	// 2. 存在 .agate/config.toml 默认 target=cursor，但现场无指纹时，严格返回空（RD-F02: 严禁由装配配置推断调用者）
 	_ = os.WriteFile(filepath.Join(root, ".cursorrules"), []byte("cursor"), 0644)
 	_ = os.MkdirAll(filepath.Join(root, ".agate"), 0755)
 	_ = os.WriteFile(filepath.Join(root, ".agate", "config.toml"), []byte("[agent]\ntargets = [\"cursor\"]\n"), 0644)
-	if got := DetectCurrentAgent(root); got != "cursor" {
-		t.Fatalf("多入口并存且配置唯一 target=cursor 时预期返回 cursor，实际: %s", got)
+	if got := DetectCurrentAgent(root); got != "" {
+		t.Fatalf("无现场指纹时严禁由默认 target 配置推断调用者，预期返回空，实际: %s", got)
 	}
 
-	// 3. 配置也为多目标时，回退读取 TASK.md 的 CurrentAgent
+	// 3. 配置也为多目标且无当前指纹时，严禁冒用历史 TASK.md 猜测当前身份，严格返回空
 	_ = os.WriteFile(filepath.Join(root, ".agate", "config.toml"), []byte("[agent]\ntargets = [\"codex\", \"cursor\"]\n"), 0644)
 	_ = SaveTaskBoard(filepath.Join(root, "TASK.md"), &TaskManifest{
 		TaskId:       "TASK-1",
@@ -431,8 +439,8 @@ func TestDetectCurrentAgentCodexAndConfigFallback(t *testing.T) {
 		CurrentAgent: "claude",
 		NextAgent:    "any",
 	})
-	if got := DetectCurrentAgent(root); got != "claude" {
-		t.Fatalf("多目标无法唯一确定时预期回退 TASK.md CurrentAgent (claude)，实际: %s", got)
+	if got := DetectCurrentAgent(root); got != "" {
+		t.Fatalf("多目标且无当前指纹时严禁冒用历史 TASK.md 猜测当前身份，预期返回空字符串，实际: %s", got)
 	}
 }
 
@@ -557,6 +565,72 @@ func TestMultiRoleRelayDevTestOpsAndSessionRoleCardIsolation(t *testing.T) {
 	}
 	if !strings.Contains(doneManifest.Body, "snapshot_digest="+doneManifest.SnapshotDigest) {
 		t.Errorf("ops 终态交付时间线必须严格绑定最新 snapshot_digest，实际正文:\n%s", doneManifest.Body)
+	}
+}
+
+func TestRelayPublicAPIRejectsEmptyAgent(t *testing.T) {
+	// R3-F03: Relay 公共包接口直接调用时，严禁以空/纯空白身份写入任务或租约
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+	_ = os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# AGENTS"), 0644)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "contexts"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpDir, "contexts", "context.md"), []byte("# CONTEXT"), 0644)
+
+	// 1. ClaimTaskWithRole 传入空 agent 必须报错阻断
+	if _, _, err := ClaimTaskWithRole(tmpDir, "", RoleDev, false); err == nil {
+		t.Fatal("ClaimTaskWithRole 空 agent 预期报错，实际成功")
+	}
+	if _, _, err := ClaimTaskWithRole(tmpDir, "   ", RoleDev, false); err == nil {
+		t.Fatal("ClaimTaskWithRole 纯空白 agent 预期报错，实际成功")
+	}
+
+	// 2. 将任务流转至 HANDOVER_READY，NextAgent 为 any
+	_, _, err := ClaimTaskWithRole(tmpDir, "cursor", RoleDev, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = HandoverTask(HandoverOptions{
+		RootDir:      tmpDir,
+		CurrentAgent: "cursor",
+		NextAgent:    "any",
+		CurrentRole:  RoleDev,
+		NextRole:     RoleTest,
+		SkipVerify:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. ResumeTaskWithRole 直接调用且环境无任何执行者特征，必须报错阻断，严禁写入空执行者
+	// 确保彻底清空所有宿主 Agent 环境变量
+	for _, key := range []string{
+		"CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_VERSION", "CODEX_CI", "CODEX_SHELL",
+		"CURSOR_AGENT", "CURSOR_VERSION", "ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE",
+		"CLAUDE_CODE", "CLAUDE_AGENT", "WINDSURF_AGENT", "TERM_PROGRAM", "VSCODE_GIT_IPC_HANDLE",
+		"AGATE_SESSION_CONTEXT",
+	} {
+		t.Setenv(key, "")
+	}
+
+	if _, err := ResumeTaskWithRole(tmpDir, "", RoleTest); err == nil {
+		t.Fatal("ResumeTaskWithRole 在空 agent 且环境无身份时预期报错拒绝，实际成功")
+	}
+
+	// 4. AcquireLockWithRole 与 ReleaseLock 传入空 agent 必须报错阻断 (R4-06)
+	if _, err := AcquireLockWithRole(tmpDir, "TASK-123", "", RoleDev, 0, false); err == nil {
+		t.Fatal("AcquireLockWithRole 传入空 agent 预期报错拒绝，实际成功")
+	}
+	if err := ReleaseLock(tmpDir, "", false); err == nil {
+		t.Fatal("ReleaseLock 传入空 agent 且非 force 时预期报错拒绝，实际成功")
+	}
+
+	// 5. 断言 TASK.md 与租约未被破坏
+	checkM, _ := LoadTaskBoard(filepath.Join(tmpDir, "TASK.md"))
+	if checkM.Status != StatusHandoverReady {
+		t.Fatalf("被拦截后任务看板应保持 HANDOVER_READY，实际为: %s", checkM.Status)
+	}
+	if checkM.CurrentAgent == "" {
+		t.Fatalf("被拦截后 TASK.md 不得被覆写为空执行者")
 	}
 }
 

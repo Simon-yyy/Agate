@@ -32,7 +32,8 @@
 - **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t codex,cursor,antigravity`；选择顺序为显式目标、项目默认装配集合、当前 Agent、已有入口；无法确定时要求显式选择）
 - **分发计划预览**：`agate init -t <工具> --dry-run`（只读展示创建、更新、跳过与冲突，列出已有入口及潜在重叠读取）；Git 已跟踪规则需要 `--allow-tracked` 明确允许更新。
 - **开放工具档案管理**：`agate profile [list|add <name>]`（支持 `--path`、`--format markdown|frontmatter-md|pointer`、`--env`、`--term-program`、`--reads`、`--frontmatter`、`--global`、`--local`，免改源码扩展任意新兴 AI 编程工具）
-- **多工具独立窗口视图**：`agate workspace [plan|apply|restore|open <target>]`（在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立规则过滤视图，零侵入 `.vscode/settings.json`）
+- **多源环境指纹诊断**：`agate detect [--explain] [--json]`（只读诊断当前 Editor 宿主、Runner 执行者、远程白名单路径、受限祖先进程与跨会话信封状态）
+- **多工具独立窗口视图**：`agate workspace [plan|apply|restore|open <target>]`（支持 `-t cursor,antigravity,windsurf` 逗号分隔多目标或 `all`，在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立规则过滤视图，零侵入 `.vscode/settings.json`）
 - **技术拓扑回填**：`agate scan --write`（自动探测技术栈与端口，同步回填 MAP.md 与 contexts/context.md）
 - **三层策略配置**：支持 `~/.agate/config.toml`（个人全局）+ `.agate/config.toml`（团队共享）+ `.agate/config.local.toml`（本机私有覆写，安全门禁遵循单调收紧只升不降）
 - **Git 私有隔离**：`agate isolate`（静默配置 `.git/info/exclude`）
@@ -67,9 +68,10 @@
 - [cmd/hook.go](cmd/hook.go)：`agate hook` 命令行入口，管理本地 Git 门禁挂载状态。
 - [cmd/export.go](cmd/export.go)：`agate export` 命令行入口，导出自包含单文件 HTML 审查报告。
 - [cmd/view.go](cmd/view.go)：`agate view` 命令行入口，在浏览器中打开最新生成的审查报告。
-- [cmd/task.go](cmd/task.go)：`agate task` 命令行入口，跨 Agent 与多角色（`dev`/`test`/`ops`）任务认领、状态机流转、交接与唤醒接棒（`handover` 与 `done` 统一联动 `guard.strict` 配置、Phase 0 静态审计与两振熔断）。
+- [cmd/task.go](cmd/task.go)：`agate task` 命令行入口，跨 Agent 与多角色（`dev`/`test`/`ops`）任务认领、状态机流转、交接与唤醒接棒（统一前置校验配置文件合法性与非空白 `--agent` 参数，`handover` 与 `done` 联动 `guard.strict` 配置、Phase 0 静态审计与两振熔断）。
 - [cmd/profile.go](cmd/profile.go)：`agate profile` 命令行入口，列出与注册内置/自定义 AI 工具档案（支持项目级、本机私有与个人全局三层配置落盘）。
-- [cmd/workspace.go](cmd/workspace.go)：`agate workspace` 命令行入口，预览、生成、恢复或直接启动按工具隔离的 `.code-workspace` 独立视图窗口。
+- [cmd/workspace.go](cmd/workspace.go)：`agate workspace` 命令行入口，预览、生成、恢复或直接启动按工具隔离的 `.code-workspace` 独立视图窗口（支持逗号分隔 `-t` 目标列表与空白参数前置拦截）。
+- [cmd/detect.go](cmd/detect.go)：`agate detect` 命令行入口，只读诊断当前宿主编辑器（Editor）、执行 Agent（Runner）、白名单路径与网络传输环境指纹（支持 `--explain` 脱敏详细证据链及 `--json` 机器格式输出）。
 
 ### 2. 规约适配与分发 (`pkg/adapter/`)
 
@@ -81,7 +83,7 @@
 ### 3. Git 治理与安全门禁 (`pkg/git/`)
 
 - [pkg/git/exclude.go](pkg/git/exclude.go)：基于 `.git/info/exclude` 的私有状态隐形隔离治理，支持 Git Worktree 动态寻径、规则幂等去重与原子写入。
-- [pkg/git/hook.go](pkg/git/hook.go)：管理本地 `pre-commit`（提纯自检）与 `pre-push`（防偷跑硬阻断，覆盖全量 Agent 与 CI 环境指纹）双物理钩子。
+- [pkg/git/hook.go](pkg/git/hook.go)：管理本地 `pre-commit`（提纯自检）与 `pre-push`（防偷跑硬阻断，覆盖全量 Agent 与 CI 环境指纹及大小写无关的 `AGATE_SESSION_CONTEXT` 会话身份拦截）双物理钩子。
 - [pkg/git/diff.go](pkg/git/diff.go)：提取分支（兼容尚无 Commit 的 Unborn HEAD 空仓库回退）、Commit 元数据与 UTF-8 路径 Diff 差异行流。
 
 ### 4. 代码洁癖与安全审计 (`pkg/guard/`)
@@ -124,7 +126,10 @@
 
 ### 9. 智能体指纹与注册中心 (`pkg/agent/`)
 
-- [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf 及开放自定义工具）、支持自定义档案的两阶段优先级环境指纹嗅探器（`DetectEnvironmentWithProfiles`：第一阶段强指纹 `env_keys` 优先于第二阶段宿主终端 `term_programs`/`gitIPC`）与类型注册表。
+- [pkg/agent/context.go](pkg/agent/context.go)：统一身份感知模型，解耦宿主编辑器（Editor）与执行者（Runner），定义 `known`/`unknown`/`ambiguous` 状态模型、`EffectiveTarget()` 首选装配目标判定与 `HasConflict()` 冲突检测容器。
+- [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf 及开放自定义工具）、支持自定义档案的全候选汇总与冲突仲裁引擎（`InspectContext`/`InspectContextFull`/`DetectEnvironmentFull`：进程级强指纹 `env_keys` 优先于宿主弱指纹 `term_programs`/`gitIPC` 与路径白名单，活跃祖先进程压制跨宿主残留会话变量，冲突时严禁顺序短路盲选）。
+- [pkg/agent/collector.go](pkg/agent/collector.go)：受限祖先进程链探测器（`ProcessInspector` 接口，Linux `/proc` 安全解析、内置 `visited` 防环与多实例去重）与远程白名单路径特征匹配器（支持 `.cursor-server` 与 `.vscode-server` 对照，区分活跃会话专有变量与全局 `PATH`，非特权安全降级且严禁读取完整命令行）。
+- [pkg/agent/session.go](pkg/agent/session.go)：跨会话声明上下文协议解析器（`AGATE_SESSION_CONTEXT`，包含长度 ≤512B、版本锁定、凭据防火墙、过期拦截、受控来源白名单 `terminal`/`ssh`/`extension`/`ide`/`ci` 及 `SessionID` 脱敏与终端会话一致性校验）。
 - [pkg/agent/profile.go](pkg/agent/profile.go)：内置入口档案、开放式声明档案（支持 `markdown`、`frontmatter-md`、`pointer` 三种渲染格式，`.md`/`.mdc`/`.rules` 路径后缀及 `env_keys`/`term_programs`/`frontmatter` 属性）、名称和跨平台相对路径校验（含 `verify.cmd`/`verify.sh`/`verify.bat`/`.ignore` 等保留资产保护）；自定义档案不能静默覆写内置工具或声明同路径目标。
 
 ### 10. 三层策略配置加载 (`pkg/config/`)

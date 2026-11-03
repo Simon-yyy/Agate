@@ -32,7 +32,8 @@
 | :--- | :--- | :--- | :--- |
 | **`agate init`** | 一键工程护栏挂载 | 消除配置分裂，规范项目基线 | 先生成只读规则分发计划（支持 `--dry-run` 预览与 `--allow-tracked` 跟踪保护），按受管区块合并规约至各 Agent，初始化双地图骨架（`MAP.md` + `contexts/context.md`）与本地 Git 双重门禁。 |
 | **`agate profile`** | 开放式工具档案扩展 | 免改源码兼容任意新兴 AI 编程工具 | 提供 `list` 与 `add <name>`，支持声明 `markdown`、`frontmatter-md`（`.mdc`）与 `pointer` 三大渲染范式及 `env_keys` / `term_programs` 环境指纹，支持个人全局、团队项目与本机私有三层落盘。 |
-| **`agate workspace`** | 多工具独立窗口视图 | 消除同仓多工具规则并存干扰与串味 | 提供 `plan/apply/restore/open`，在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口级规则过滤视图，零侵入团队 `.vscode/settings.json`。 |
+| **`agate detect`** | 多源环境与身份指纹诊断 | 消除远程开发与多工具并存下的身份误判 | 解耦宿主编辑器（Editor）与执行 Agent（Runner），综合环境变量、远程白名单路径（`/.cursor-server/`）、受限祖先进程链与 `AGATE_SESSION_CONTEXT` 安全信封输出三态诊断（支持 `--explain` 与 `--json`）。 |
+| **`agate workspace`** | 多工具独立窗口视图 | 消除同仓多工具规则并存干扰与串味 | 提供 `plan/apply/restore/open`（支持 `-t` 逗号分隔多目标），在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口级规则过滤视图，零侵入团队 `.vscode/settings.json`。 |
 | **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 17 项 AI 缓存、草稿与私有配置（包含 `.env*` 与 `*.agate.bak`），不修改公共 `.gitignore`，团队零感知。 |
 | **`agate verify`** | 闭环自检物证交付 | 杜绝伪交付与无效死循环试错 | **阶段 0** 静态扫描（拦截密钥、大文件、未完工占位符等 7 大红线，支持 `--staged` 暂存区定向审查）+ **阶段 1** 优先调度自检脚本或测试套件，输出绿色 `[PASS]` 物证，连续失败触发**两振硬熔断**。 |
 | **`agate task`** | 跨 Agent / 多角色任务接力 | 跨工具任务脱节、多会话串味与冲突 | 提供 `status/claim/handover/resume/done` 全流程状态机驱动，支持 `--role dev|test|ops` 多角色协同、独立会话角色卡、多会话租约互斥锁、代码快照一致性核验与接力四要素结构化传承。 |
@@ -145,13 +146,18 @@ agate profile add cline --path .clinerules --format pointer --reads AGENTS.md --
 agate profile add continue --path .continue/rules/agate.md --format markdown
 ```
 
-- **自动环境嗅探**：只要自定义档案配置了 `--env`（强指纹）或 `--term-program`（弱指纹），在该工具终端内直接运行 `agate init`（无需 `-t`）即可自动识别并精准生成对应规则！
+- **自动环境嗅探与多源身份诊断（`agate detect`）**：解耦宿主编辑器（Editor）与执行者（Runner），支持识别内置/自定义环境变量、远程服务端路径（`/.cursor-server/`）、受限祖先进程及 `AGATE_SESSION_CONTEXT` 安全信封：
+  ```bash
+  agate detect                          # 诊断当前宿主编辑器、执行 Agent 与首选装配目标
+  agate detect --explain                # 展示脱敏后的详细证据链与冲突告警
+  agate detect --json                   # 输出机器可读的结构化 JSON 诊断结果
+  ```
 - **多工具独立窗口视图（`agate workspace`）**：当同一仓库并存多个工具规则时，可生成窗口级 `.code-workspace` 过滤视图，每个 IDE 窗口仅展示自身规则与共享地图，零侵入团队 `.vscode/settings.json`：
   ```bash
   agate workspace plan                  # 只读预览各工具窗口将隐藏的其他规则文件
-  agate workspace apply                 # 生成 .ai-memory/workspaces/<target>.code-workspace
+  agate workspace apply -t cursor,windsurf # 支持 -t 逗号分隔多目标生成 .ai-memory/workspaces/<target>.code-workspace
   agate workspace open cursor           # 直接启动 Cursor 打开专属隔离视图窗口
-  agate workspace restore               # 清理私有工作区视图配置
+  agate workspace restore               # 清理私有工作区视图配置（支持 -t 定向清理）
   ```
 - **物理安全底座兜底**：无论使用任何软件，`.git/info/exclude` 隐形隔离、`pre-commit`（`agate verify --staged`）与 `pre-push` 物理防偷跑均 100% 自动生效。
 
@@ -415,7 +421,6 @@ graph TD
 
 - 架构设计与推导背景：[系统架构与技术设计白皮书 (docs/DESIGN.md)](docs/DESIGN.md)
 - 协议标准与规约正文：[协议与规范标准手册 (docs/SPEC.md)](docs/SPEC.md)
-- 多 Agent 规则兼容与代码审查方案：[多 Agent 规则兼容与并存方案 (docs/CODE_REVIEW.md)](docs/CODE_REVIEW.md)
 
 ---
 

@@ -122,6 +122,9 @@ func AcquireLock(rootDir string, taskId, agent string, lease time.Duration, forc
 
 // AcquireLockWithRole 抢占或续约带角色标识的任务租约锁
 func AcquireLockWithRole(rootDir string, taskId, agent, role string, lease time.Duration, force bool) (*TaskLock, error) {
+	if strings.TrimSpace(agent) == "" {
+		return nil, fmt.Errorf("抢占任务锁失败: agent 身份不能为空白字符")
+	}
 	if lease == 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -182,6 +185,9 @@ func AcquireLockWithRole(rootDir string, taskId, agent, role string, lease time.
 
 // ReleaseLock 释放任务租约锁
 func ReleaseLock(rootDir string, agent string, force bool) error {
+	if !force && strings.TrimSpace(agent) == "" {
+		return fmt.Errorf("释放任务锁失败: 非强制释放时 agent 身份不能为空白字符")
+	}
 	releaseGuard, err := acquireLockTransitionGuard(rootDir)
 	if err != nil {
 		return err

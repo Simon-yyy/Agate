@@ -72,6 +72,7 @@ func resolveGlobalPath(homeDir string) string {
 type layerData struct {
 	path            string
 	scope           string
+	isExplicitEnv   bool
 	targets         []string
 	hasTargets      bool
 	profiles        map[string]agent.Profile
@@ -104,12 +105,14 @@ func LoadWithGlobal(root string) (Config, string, error) {
 func LoadMerged(root, homeDir string) (Config, string, error) {
 	cfg := Default()
 	type layerSpec struct {
-		path  string
-		scope string
+		path          string
+		scope         string
+		isExplicitEnv bool
 	}
 	var specs []layerSpec
 	if globalPath := resolveGlobalPath(homeDir); globalPath != "" {
-		specs = append(specs, layerSpec{path: globalPath, scope: "global"})
+		isExplicit := strings.TrimSpace(os.Getenv("AGATE_GLOBAL_CONFIG")) != ""
+		specs = append(specs, layerSpec{path: globalPath, scope: "global", isExplicitEnv: isExplicit})
 	}
 	if strings.TrimSpace(root) != "" {
 		specs = append(specs,
@@ -127,6 +130,7 @@ func LoadMerged(root, homeDir string) (Config, string, error) {
 		if !exists {
 			continue
 		}
+		layer.isExplicitEnv = spec.isExplicitEnv
 		loadedPaths = append(loadedPaths, spec.path)
 		cfg.Loaded = true
 		if err := mergeLayer(&cfg, layer); err != nil {
@@ -241,6 +245,14 @@ func mergeLayer(cfg *Config, layer layerData) error {
 			return err
 		}
 	}
+
+	// 全局配置层 (~/.agate/config.toml) 仅提供工具档案，严禁隐式修改项目的安全门禁与 Hook 策略；
+	// 仅当用户显式通过 AGATE_GLOBAL_CONFIG 环境变量指定全局策略时才准予参与。
+	// (R2-S02: 纯空白全局配置变量严禁绕过安全隔离判断)
+	if layer.scope == "global" && (!layer.isExplicitEnv || strings.TrimSpace(os.Getenv("AGATE_GLOBAL_CONFIG")) == "") {
+		return nil
+	}
+
 	if layer.scope == "local" {
 		if layer.hasStrict {
 			if cfg.Guard.Strict && !layer.strict {
@@ -517,7 +529,7 @@ func validateGuardPolicy(field, value string) error {
 	case "", "warning", "warn", "error", "off", "ignore":
 		return nil
 	default:
-		return fmt.Errorf("guard.%s 仅支持 warning/warn、error 或 off/ignore，当前值: %q", field, value)
+		return fmt.Errorf("guard.%s 仅支持 warning/warn、error 或 off/ignore（包含非法配置值）", field)
 	}
 }
 

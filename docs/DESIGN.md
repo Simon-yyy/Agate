@@ -56,7 +56,7 @@
 - **`pkg/reporter`**：自包含单文件 HTML 审查报告引擎，汇聚已脱敏安全审计、Diff 对比、任务看板与物证日志（区分“未执行动态测试”与“动态测试未通过”），支持跨平台浏览器安全唤起；
 - **`pkg/harness`**：地图骨架生成器、跨平台文件操作、相对路径自适应软链回退与真原子写入机制；
 - **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行；
-- **`pkg/agent`**：多 Agent 环境感知（支持内置工具与自定义档案 `env_keys` 强指纹优先于 `term_programs` 弱指纹的两阶段探测）、开放式工具档案校验（`profile.go`）及注册中心；
+- **`pkg/agent`**：多源身份感知与冲突仲裁引擎（`context.go`、`registry.go`、`collector.go`、`session.go`），解耦宿主编辑器（Editor）与执行者（Runner），综合内置/自定义档案指纹、远程白名单路径（`/.cursor-server/`）、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封执行三态仲裁（`known`/`unknown`/`ambiguous`），并提供开放式工具档案校验（`profile.go`）；
 - **`pkg/config`**：三层策略配置中心（个人全局 `~/.agate/config.toml` + 团队项目 `.agate/config.toml` + 本机私有 `.agate/config.local.toml`），支持工具档案持久化（`UpsertProfile`）与本机安全门禁单调收紧（Monotonic Tightening）；
 - **`pkg/workspace`**：多工具窗口级独立视图引擎（`workspace.go`），在 `.ai-memory/workspaces/<target>.code-workspace` 生成独立文件树与搜索过滤视图，零侵入团队 `.vscode/settings.json`。
 
@@ -74,6 +74,7 @@ agate/
 ├── cmd/
 │   ├── root.go             # 根命令定义、三态退出码契约、版本信息与全局 Flag
 │   ├── init.go             # agate init 规则计划预览与护栏编排逻辑 (--dry-run, --allow-tracked)
+│   ├── detect.go           # agate detect 多源环境与身份指纹只读诊断 (--explain, --json)
 │   ├── profile.go          # agate profile 开放式工具档案列表与注册 (list/add)
 │   ├── workspace.go        # agate workspace 多工具独立窗口视图管理 (plan/apply/restore/open)
 │   ├── verify.go           # agate verify 自检引擎 (--staged, --strict, --skip-guard, --report, --resume-after-break)
@@ -89,7 +90,10 @@ agate/
 │   │   ├── adapter.go      # 多 Agent 目标解析、优先级决策与规约源加载
 │   │   └── plan.go         # 只读分发计划、三大渲染范式合并、快照复核、跟踪保护与双向重叠诊断
 │   ├── agent/
-│   │   ├── registry.go     # 支持自定义档案的两阶段智能体环境指纹嗅探与类型注册中心
+│   │   ├── context.go      # Editor/Runner 角色解耦、三态模型与 DetectionContext 证据容器
+│   │   ├── registry.go     # 全候选汇总、多源证据分级与冲突仲裁引擎 (InspectContext / DetectEnvironmentFull)
+│   │   ├── collector.go    # 受限祖先进程链探测器 (/proc 安全解析与防环) 与远程白名单路径匹配器
+│   │   ├── session.go      # AGATE_SESSION_CONTEXT 跨会话安全信封解析器与五重校验防线
 │   │   └── profile.go      # 内置与开放式工具档案、三大格式范式、跨平台路径边界与碰撞校验
 │   ├── config/
 │   │   └── config.go       # 全局/项目/本机三层配置合并、UpsertProfile 与安全单调收紧
@@ -267,6 +271,12 @@ Agate 在初始化扫描上下文时，批量执行 `git -c core.quotepath=false
 3. **窗口级独立视图隔离 (`pkg/workspace/workspace.go` & `cmd/workspace.go`)**：
    - 通过 `agate workspace plan/apply/restore/open` 在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立的 `files.exclude` / `search.exclude` 视图文件，仅隐藏其他工具规则并保留当前工具规则与共享双地图，完全不触碰团队共享 `.vscode/settings.json`。
 
+### 3.12 多源身份感知与跨会话安全信封 (`pkg/agent/*` & `cmd/detect.go`)
+针对 SSH Remote、WSL、容器与 `tmux` 复用终端中环境变量丢失或残留导致身份误判的问题：
+1. **宿主 (`Editor`) 与执行者 (`Runner`) 严格解耦**：避免将仅处于某 IDE 集成终端内的人类普通命令误判为自动化 Agent 正在运行，`agate task` 仅采信确凿的 `Runner` 身份，而 `agate init` 通过 `EffectiveTarget()` 优先采信确知 `Runner`、次选确知 `Editor`；
+2. **远程路径与受限祖先进程印证**：区分当前会话专有路径变量（如 `VSCODE_GIT_ASKPASS_NODE`）与全局残余 `PATH`；Linux 下沿 PPID 向上受限采集最多 4 层祖先进程（内置 `visited` 防环且禁读 `cmdline`），并以活跃父进程压制跨宿主残留环境变量；
+3. **跨会话安全信封 (`AGATE_SESSION_CONTEXT`)**：支持受控来源（`terminal`/`ssh`/`extension`/`ide`/`ci`）在子会话间传递带 `exp` 时效与凭据防火墙保护的身份声明，并在 `agate detect --explain` 与 JSON 输出中自动抹除内部 `SessionID`。
+
 ---
 
 ## 四、 跨平台与技术选型论证
@@ -298,7 +308,8 @@ Agate 在初始化扫描上下文时，批量执行 `git -c core.quotepath=false
 - [x] `agate task`：跨 Agent 与多角色（`dev`/`test`/`ops`）协同接力看板、同工具多窗口 `SessionId` 租约锁、独立会话角色卡与 `snapshot_digest` 代码快照一致性核验；
 - [x] `agate export` & `agate view`：自包含 HTML 审查物证报告导出与极速预览；
 - [x] 两振熔断机制（Two-Strike Circuit Breaker）：物理失败计数器与终端红框拦截；
-- [x] `agate profile` & `agate workspace`：开放式工具档案扩展（三大规则范式、动态环境指纹嗅探、三层配置与安全单调收紧）及多工具 `.code-workspace` 窗口级独立视图隔离。
+- [x] `agate profile` & `agate workspace`：开放式工具档案扩展（三大规则范式、动态环境指纹嗅探、三层配置与安全单调收紧）及多工具 `.code-workspace` 窗口级独立视图隔离；
+- [x] `agate detect`：宿主 Editor 与执行 Runner 解耦、远程服务端路径白名单、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封。
 
 ### Phase 3: CI/CD 接入与云端发布（部分完成）
 - [x] GitHub Actions Goreleaser 跨平台全自动发版流水线；

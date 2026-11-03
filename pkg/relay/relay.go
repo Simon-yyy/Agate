@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"agate/internal/templates"
-	"agate/pkg/adapter"
 	agentinfo "agate/pkg/agent"
 	"agate/pkg/config"
 	"agate/pkg/git"
@@ -126,7 +125,8 @@ func ComputeWorkspaceDigest(root string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// DetectCurrentAgent 智能嗅探当前执行环境对应的 Agent 名称
+// DetectCurrentAgent 智能嗅探当前执行环境对应的 Agent 名称。
+// 若无法确定当前调用者身份，严格返回 ""，不依赖历史任务与硬编码猜测。
 func DetectCurrentAgent(rootDir string) string {
 	if rootDir == "" {
 		rootDir = "."
@@ -134,63 +134,26 @@ func DetectCurrentAgent(rootDir string) string {
 
 	termProgram := strings.ToLower(os.Getenv("TERM_PROGRAM"))
 	gitIpc := strings.ToLower(os.Getenv("VSCODE_GIT_IPC_HANDLE"))
-	cfg, _, cfgErr := config.Load(rootDir)
+	cfg, _, cfgErr := config.LoadWithGlobal(rootDir)
+
+	profiles := cfg.Agent.Profiles
+	if cfgErr != nil {
+		profiles = nil
+	}
 
 	// 1. 环境变量与活动终端优先探测（含自定义工具档案的 env_keys / term_programs）
-	if detected, ok := agentinfo.DetectEnvironmentWithProfiles(os.Getenv, termProgram, gitIpc, cfg.Agent.Profiles); ok {
-		return string(detected)
+	ctx := agentinfo.InspectContext(os.Getenv, termProgram, gitIpc, profiles)
+	// R2-F02 闭环：任务调用者与装配目标严格解耦。
+	// 仅依据现场确凿的执行者（Runner）作为任务调用者，严禁将宿主编辑器（Editor）无条件升级为任务执行者。
+	// 若无确凿 Runner 强指纹，严格返回空字符串，要求人类显式传入 --agent <name>。
+	if ctx.RunnerStatus == agentinfo.StatusAmbiguous {
+		return ""
+	}
+	if ctx.RunnerStatus == agentinfo.StatusKnown && ctx.Runner != "" {
+		return ctx.Runner
 	}
 
-	// 2. 扫描工作区已有规则目标（含 AGENTS.md 受管标记与自定义档案）
-	existing := adapter.DetectExistingTargets(rootDir)
-	if data, err := os.ReadFile(filepath.Join(rootDir, "AGENTS.md")); err == nil && strings.Contains(string(data), "<!-- agate:codex-rules:start -->") {
-		existing = append(existing, adapter.TargetCodex)
-	}
-	if cfgErr == nil {
-		var customNames []string
-		for name, profile := range cfg.Agent.Profiles {
-			if info, err := os.Stat(filepath.Join(rootDir, filepath.FromSlash(profile.Path))); err == nil && info.Mode().IsRegular() {
-				customNames = append(customNames, name)
-			}
-		}
-		sort.Strings(customNames)
-		for _, name := range customNames {
-			existing = append(existing, adapter.AgentTarget(name))
-		}
-	}
-
-	seen := make(map[adapter.AgentTarget]bool)
-	var unique []adapter.AgentTarget
-	for _, t := range existing {
-		if !seen[t] {
-			seen[t] = true
-			unique = append(unique, t)
-		}
-	}
-	if len(unique) == 1 {
-		return string(unique[0])
-	}
-
-	// 3. 多目标并存或无规则文件时，检查 .agate/config.toml 是否配置了唯一默认目标
-	if cfgErr == nil && len(cfg.Agent.Targets) == 1 {
-		target := strings.ToLower(strings.TrimSpace(cfg.Agent.Targets[0]))
-		if target != "" && target != "all" {
-			if parsed, ok := agentinfo.Parse(target); ok {
-				return string(parsed)
-			}
-			return target
-		}
-	}
-
-	// 4. 回退检查当前 TASK.md 中的持锁/执行 Agent
-	if manifest, err := LoadTaskBoard(filepath.Join(rootDir, "TASK.md")); err == nil && manifest != nil {
-		curr := strings.TrimSpace(manifest.CurrentAgent)
-		if curr != "" && !strings.EqualFold(curr, "none") {
-			return curr
-		}
-	}
-
-	return "antigravity"
+	return ""
 }
 
 // GetActiveRoleCardPath 获取当前会话角色边界卡片路径（私有会话级，不污染根目录共享规则）
@@ -257,6 +220,12 @@ func ClaimTaskWithRole(rootDir, agent, role string, force bool) (*TaskManifest, 
 }
 
 func claimTaskWithStatus(rootDir string, agent string, role string, force bool, targetStatus TaskStatus) (*TaskManifest, *TaskLock, error) {
+	cleanAgent := strings.TrimSpace(agent)
+	if cleanAgent == "" {
+		return nil, nil, fmt.Errorf("无法确定任务执行者身份 (agent 为空)，拒绝认领或流转任务状态")
+	}
+	agent = cleanAgent
+
 	root := rootDir
 	if root == "" {
 		root = "."
@@ -336,9 +305,12 @@ func HandoverTask(opts HandoverOptions) (*TaskManifest, string, error) {
 		return nil, "", err
 	}
 
-	currentAgent := opts.CurrentAgent
+	currentAgent := strings.TrimSpace(opts.CurrentAgent)
 	if currentAgent == "" {
-		currentAgent = DetectCurrentAgent(root)
+		currentAgent = strings.TrimSpace(DetectCurrentAgent(root))
+	}
+	if currentAgent == "" {
+		return nil, "", fmt.Errorf("无法确定任务交接者身份 (currentAgent 为空)，拒绝交接任务")
 	}
 	if err := ensureLockOwner(root, currentAgent, opts.Force); err != nil {
 		return nil, "", err
@@ -454,9 +426,12 @@ func DoneTask(opts HandoverOptions) (*TaskManifest, string, error) {
 		effectiveRole = manifest.CurrentRole
 	}
 
-	currentAgent := opts.CurrentAgent
+	currentAgent := strings.TrimSpace(opts.CurrentAgent)
 	if currentAgent == "" {
-		currentAgent = DetectCurrentAgent(root)
+		currentAgent = strings.TrimSpace(DetectCurrentAgent(root))
+	}
+	if currentAgent == "" {
+		return nil, "", fmt.Errorf("无法确定任务交接者身份 (currentAgent 为空)，拒绝交接任务")
 	}
 	if err := ensureLockOwner(root, currentAgent, opts.Force); err != nil {
 		return nil, "", err
@@ -584,8 +559,12 @@ func ResumeTaskWithRole(rootDir, agent, role string) (*ResumeResult, error) {
 		return nil, err
 	}
 
+	agent = strings.TrimSpace(agent)
 	if agent == "" {
-		agent = DetectCurrentAgent(root)
+		agent = strings.TrimSpace(DetectCurrentAgent(root))
+	}
+	if agent == "" {
+		return nil, fmt.Errorf("无法确定任务执行者身份 (agent 为空且未能从当前环境中推断)，拒绝恢复任务")
 	}
 
 	if manifest.Status == StatusHandoverReady &&

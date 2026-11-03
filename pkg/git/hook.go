@@ -49,6 +49,14 @@ is_agent_env=0
 if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$CURSOR_AGENT" ] || [ -n "$CURSOR_VERSION" ] || [ -n "$ANTIGRAVITY_AGENT" ] || [ -n "$GEMINI_AGENT" ] || [ -n "$ANTIGRAVITY_IDE" ] || [ -n "$CLAUDE_CODE" ] || [ -n "$CLAUDE_AGENT" ] || [ -n "$WINDSURF_AGENT" ] || [ -n "$CODEX_CI" ] || [ -n "$CODEX_SESSION_ID" ] || [ -n "$CODEX_THREAD_ID" ] || [ -n "$CODEX_VERSION" ] || [ -n "$CODEX_SHELL" ] || [ -n "$AI_AGENT" ]; then
     is_agent_env=1
 fi
+if [ -n "$AGATE_SESSION_CONTEXT" ]; then
+    ctx_lower=$(printf '%s' "$AGATE_SESSION_CONTEXT" | tr '[:upper:]' '[:lower:]')
+    case "$ctx_lower" in
+        *runner=*|*editor=*)
+            is_agent_env=1
+            ;;
+    esac
+fi
 
 if [ "$is_authorized" -eq 0 ]; then
     if [ "$is_agent_env" -eq 1 ] || { [ ! -t 1 ] && [ ! -t 2 ]; }; then

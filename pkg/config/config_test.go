@@ -173,3 +173,82 @@ install = false
 		t.Fatalf("缺少 config.local.toml 降级拦截告警: %s", warningsText)
 	}
 }
+
+func TestLoadMergedWhitespaceGlobalConfigIsolation(t *testing.T) {
+	// R2-S02: 纯空白 AGATE_GLOBAL_CONFIG 变量必须具有与空值一致的安全隔离语义
+	homeDir := t.TempDir()
+	homeAgate := filepath.Join(homeDir, ".agate")
+	if err := os.MkdirAll(homeAgate, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 家目录配置包含安全门禁与 hook 调整，试图将 hooks.install 置为 false，strict 置为 true
+	homeConfig := `[agent]
+targets = ["cursor"]
+[guard]
+strict = true
+[hooks]
+install = false
+`
+	homeConfigPath := filepath.Join(homeAgate, "config.toml")
+	if err := os.WriteFile(homeConfigPath, []byte(homeConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	// 项目未显式配置 guard 和 hooks，默认 Guard.Strict=false, Hooks.Install=true
+
+	whitespaceCases := []string{
+		"",
+		" ",
+		"   ",
+		"\t",
+		"  \t \n ",
+	}
+
+	for _, ws := range whitespaceCases {
+		t.Run("ws_"+strings.TrimSpace(ws), func(t *testing.T) {
+			t.Setenv("AGATE_GLOBAL_CONFIG", ws)
+			cfg, _, err := LoadMerged(root, homeDir)
+			if err != nil {
+				t.Fatalf("LoadMerged 失败: %v", err)
+			}
+			// 家目录的安全策略不得隐式污染项目默认门禁
+			if !cfg.Hooks.Install {
+				t.Fatalf("纯空白 AGATE_GLOBAL_CONFIG (%q) 导致家目录 hooks.install=false 绕过隔离生效！", ws)
+			}
+			if cfg.Guard.Strict {
+				t.Fatalf("纯空白 AGATE_GLOBAL_CONFIG (%q) 导致家目录 guard.strict=true 绕过隔离生效！", ws)
+			}
+		})
+	}
+
+	// 对照组：显式指定 AGATE_GLOBAL_CONFIG 时，才允许全局安全策略生效
+	t.Run("explicit_global_config", func(t *testing.T) {
+		t.Setenv("AGATE_GLOBAL_CONFIG", homeConfigPath)
+		cfg, _, err := LoadMerged(root, homeDir)
+		if err != nil {
+			t.Fatalf("LoadMerged 失败: %v", err)
+		}
+		if cfg.Hooks.Install {
+			t.Fatalf("显式指定 AGATE_GLOBAL_CONFIG 时 hooks.install 应按全局配置生效为 false")
+		}
+		if !cfg.Guard.Strict {
+			t.Fatalf("显式指定 AGATE_GLOBAL_CONFIG 时 guard.strict 应按全局配置生效为 true")
+		}
+	})
+}
+
+func TestValidateGuardPolicyDoesNotLeakSensitiveValue(t *testing.T) {
+	// R4-04: 错误信息绝不得回显输入原值，杜绝敏感配置泄露
+	err := validateGuardPolicy("todo", "secret_token_123456")
+	if err == nil {
+		t.Fatal("非法策略值应返回错误")
+	}
+	if strings.Contains(err.Error(), "secret_token_123456") {
+		t.Fatalf("安全红线拦截：validateGuardPolicy 错误信息泄漏了输入原值: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "guard.todo") || !strings.Contains(err.Error(), "仅支持 warning/warn") {
+		t.Fatalf("错误信息应包含字段名与合法枚举提示，实际: %s", err.Error())
+	}
+}

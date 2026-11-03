@@ -36,12 +36,58 @@ var workspaceCmd = &cobra.Command{
 注：隐藏仅影响当前窗口展示，不代表停止客户端加载底层物理文件。`,
 }
 
-func resolveWorkspaceContext() (string, []string, map[agent.Kind]agent.Profile, error) {
+// parseWorkspaceTargetList 拆分逗号分隔的目标字符串并去重过滤空白。
+func parseWorkspaceTargetList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	var result []string
+	seen := make(map[string]bool)
+	for _, p := range parts {
+		cleaned := strings.TrimSpace(p)
+		if cleaned != "" && !seen[cleaned] {
+			seen[cleaned] = true
+			result = append(result, cleaned)
+		}
+	}
+	return result
+}
+
+// resolveWorkspaceTargets 解析工作区目标工具列表。
+// (R6-03: 逗号分隔解析、显式空白参数拦截、配置项空白过滤与默认目标回退)
+func resolveWorkspaceTargets(cmd *cobra.Command, cfgTargets []string) ([]string, error) {
+	if cmd != nil && cmd.Flags().Changed("targets") {
+		clean := strings.TrimSpace(flagWorkspaceTargets)
+		if clean == "" {
+			return nil, fmt.Errorf("参数 -t/--targets 不能为空白字符串")
+		}
+		parsed := parseWorkspaceTargetList(clean)
+		if len(parsed) == 0 {
+			return nil, fmt.Errorf("参数 -t/--targets 未包含有效的目标工具名称")
+		}
+		return parsed, nil
+	}
+
+	var validCfg []string
+	seen := make(map[string]bool)
+	for _, t := range cfgTargets {
+		c := strings.TrimSpace(t)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			validCfg = append(validCfg, c)
+		}
+	}
+	if len(validCfg) > 0 {
+		return validCfg, nil
+	}
+
+	return []string{"cursor", "antigravity", "windsurf"}, nil
+}
+
+func resolveWorkspaceContext(cmd *cobra.Command) (string, []string, map[agent.Kind]agent.Profile, error) {
 	workDir := "."
 	if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 		workDir = repoRoot
 	}
-	cfg, _, err := config.Load(workDir)
+	cfg, _, err := config.LoadWithGlobal(workDir)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -51,13 +97,9 @@ func resolveWorkspaceContext() (string, []string, map[agent.Kind]agent.Profile, 
 		profiles[agent.Kind(name)] = prof
 	}
 
-	var targets []string
-	if strings.TrimSpace(flagWorkspaceTargets) != "" {
-		targets = []string{flagWorkspaceTargets}
-	} else if len(cfg.Agent.Targets) > 0 {
-		targets = cfg.Agent.Targets
-	} else {
-		targets = []string{"cursor", "antigravity", "windsurf"}
+	targets, err := resolveWorkspaceTargets(cmd, cfg.Agent.Targets)
+	if err != nil {
+		return "", nil, nil, err
 	}
 	return workDir, targets, profiles, nil
 }
@@ -86,7 +128,7 @@ var workspacePlanCmd = &cobra.Command{
 	Short: "只读预览各工具的独立视图文件路径与将隐藏的其他规则文件列表",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		workDir, targets, profiles, err := resolveWorkspaceContext()
+		workDir, targets, profiles, err := resolveWorkspaceContext(cmd)
 		if err != nil {
 			return err
 		}
@@ -104,7 +146,7 @@ var workspaceApplyCmd = &cobra.Command{
 	Short: "生成 .ai-memory/workspaces/<target>.code-workspace 独立视图文件",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		workDir, targets, profiles, err := resolveWorkspaceContext()
+		workDir, targets, profiles, err := resolveWorkspaceContext(cmd)
 		if err != nil {
 			return err
 		}
@@ -146,8 +188,15 @@ var workspaceRestoreCmd = &cobra.Command{
 			workDir = repoRoot
 		}
 		var targets []string
-		if strings.TrimSpace(flagWorkspaceTargets) != "" {
-			targets = []string{flagWorkspaceTargets}
+		if cmd.Flags().Changed("targets") {
+			clean := strings.TrimSpace(flagWorkspaceTargets)
+			if clean == "" {
+				return fmt.Errorf("参数 -t/--targets 不能为空白字符串")
+			}
+			targets = parseWorkspaceTargetList(clean)
+			if len(targets) == 0 {
+				return fmt.Errorf("参数 -t/--targets 未包含有效的目标工具名称")
+			}
 		}
 
 		removed, err := workspace.RestoreViews(workDir, targets)
@@ -181,7 +230,7 @@ var workspaceOpenCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := workspace.NormalizeTarget(args[0])
-		workDir, _, profiles, err := resolveWorkspaceContext()
+		workDir, _, profiles, err := resolveWorkspaceContext(cmd)
 		if err != nil {
 			return err
 		}

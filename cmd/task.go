@@ -109,6 +109,23 @@ var taskStatusCmd = &cobra.Command{
 	},
 }
 
+// resolveTaskAgent 统一前置解析并校验任务操作的 Agent 标识。
+// (R6-02: 显式传参不能为空白字符串，未指定时探测环境，缺失时阻断)
+func resolveTaskAgent(cmd *cobra.Command, workDir string) (string, error) {
+	if cmd.Flags().Changed("agent") {
+		clean := strings.TrimSpace(flagTaskAgent)
+		if clean == "" {
+			return "", fmt.Errorf("参数 --agent 不能为空白字符串")
+		}
+		return clean, nil
+	}
+	agent := relay.DetectCurrentAgent(workDir)
+	if strings.TrimSpace(agent) == "" {
+		return "", fmt.Errorf("未识别到当前 Agent 身份，请通过 --agent 显式指定")
+	}
+	return agent, nil
+}
+
 var taskClaimCmd = &cobra.Command{
 	Use:   "claim",
 	Short: "认领任务并抢占租约互斥锁",
@@ -118,9 +135,12 @@ var taskClaimCmd = &cobra.Command{
 		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 			workDir = repoRoot
 		}
-		agent := flagTaskAgent
-		if agent == "" {
-			agent = relay.DetectCurrentAgent(workDir)
+		if _, _, err := config.LoadWithGlobal(workDir); err != nil {
+			return err
+		}
+		agent, err := resolveTaskAgent(cmd, workDir)
+		if err != nil {
+			return err
 		}
 
 		manifest, lock, err := relay.ClaimTaskWithRole(workDir, agent, flagTaskRole, flagTaskForce)
@@ -145,7 +165,7 @@ var taskHandoverCmd = &cobra.Command{
 		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 			workDir = repoRoot
 		}
-		cfg, _, cfgErr := config.Load(workDir)
+		cfg, _, cfgErr := config.LoadWithGlobal(workDir)
 		if cfgErr != nil {
 			return cfgErr
 		}
@@ -157,9 +177,9 @@ var taskHandoverCmd = &cobra.Command{
 			return err
 		}
 
-		agent := flagTaskAgent
-		if agent == "" {
-			agent = relay.DetectCurrentAgent(workDir)
+		agent, err := resolveTaskAgent(cmd, workDir)
+		if err != nil {
+			return err
 		}
 
 		cmd.Printf("\033[94m[agate task] [%s] 正在准备交接并编译可核验物证...\033[0m\n", agent)
@@ -226,9 +246,12 @@ var taskResumeCmd = &cobra.Command{
 		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 			workDir = repoRoot
 		}
-		agent := flagTaskAgent
-		if agent == "" {
-			agent = relay.DetectCurrentAgent(workDir)
+		if _, _, err := config.LoadWithGlobal(workDir); err != nil {
+			return err
+		}
+		agent, err := resolveTaskAgent(cmd, workDir)
+		if err != nil {
+			return err
 		}
 
 		res, err := relay.ResumeTaskWithRole(workDir, agent, flagTaskRole)
@@ -274,7 +297,7 @@ var taskDoneCmd = &cobra.Command{
 		if repoRoot, err := git.GetRepoRoot("."); err == nil && repoRoot != "" {
 			workDir = repoRoot
 		}
-		cfg, _, cfgErr := config.Load(workDir)
+		cfg, _, cfgErr := config.LoadWithGlobal(workDir)
 		if cfgErr != nil {
 			return cfgErr
 		}
@@ -283,9 +306,9 @@ var taskDoneCmd = &cobra.Command{
 			return err
 		}
 
-		agent := flagTaskAgent
-		if agent == "" {
-			agent = relay.DetectCurrentAgent(workDir)
+		agent, err := resolveTaskAgent(cmd, workDir)
+		if err != nil {
+			return err
 		}
 
 		cmd.Printf("\033[94m[agate task] [%s] 正在执行任务终态自检与归档...\033[0m\n", agent)

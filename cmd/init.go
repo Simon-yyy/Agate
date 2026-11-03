@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"agate/pkg/adapter"
 	agentinfo "agate/pkg/agent"
@@ -46,7 +47,7 @@ func newInitCommand() *cobra.Command {
 					defer func() { _ = os.Chdir(origPwd) }()
 				}
 			}
-			cfg, configPath, err := config.Load(pwd)
+			cfg, configPath, err := config.LoadWithGlobal(pwd)
 			if err != nil {
 				return err
 			}
@@ -56,11 +57,27 @@ func newInitCommand() *cobra.Command {
 					cmd.Printf("[i] %s\n", warning)
 				}
 			}
+			// R2-F01 闭环：清洗有效目标，严禁纯空白目标绕过冲突门禁
+			validTargets := filterValidTargets(targets)
+			if len(targets) > 0 && len(validTargets) == 0 {
+				return fmt.Errorf("显式指定的装配目标 (-t/--targets) 不能为空白字符，请传入有效的工具名称（如 -t cursor）")
+			}
+			validConfigTargets := filterValidTargets(cfg.Agent.Targets)
+
+			detectionCtx := agentinfo.InspectContext(os.Getenv, os.Getenv("TERM_PROGRAM"), os.Getenv("VSCODE_GIT_IPC_HANDLE"), cfg.Agent.Profiles)
+			if len(validTargets) == 0 && len(validConfigTargets) == 0 {
+				if detectionCtx.RunnerStatus == agentinfo.StatusAmbiguous {
+					return fmt.Errorf("环境检测到相互冲突的 Agent 身份指纹: %v；未解决身份冲突前拒绝回退已有规则入口，请使用 -t <工具> 显式指定装配目标", detectionCtx.Warnings)
+				}
+				if detectionCtx.RunnerStatus != agentinfo.StatusKnown && detectionCtx.EditorStatus == agentinfo.StatusAmbiguous {
+					return fmt.Errorf("环境检测到相互冲突的 Editor 宿主环境: %v；未解决身份冲突前拒绝回退已有规则入口，请使用 -t <工具> 显式指定装配目标", detectionCtx.Warnings)
+				}
+			}
 			detectedAgent, detected := agentinfo.DetectEnvironmentWithProfiles(os.Getenv, os.Getenv("TERM_PROGRAM"), os.Getenv("VSCODE_GIT_IPC_HANDLE"), cfg.Agent.Profiles)
-			inputs := targets
+			inputs := validTargets
 			selection := "显式目标"
-			if len(inputs) == 0 && len(cfg.Agent.Targets) > 0 {
-				inputs, selection = cfg.Agent.Targets, "项目默认装配集合"
+			if len(inputs) == 0 && len(validConfigTargets) > 0 {
+				inputs, selection = validConfigTargets, "项目默认装配集合"
 			} else if len(inputs) == 0 && detected {
 				selection = "当前 Agent 环境"
 			} else if len(inputs) == 0 {
@@ -181,5 +198,16 @@ func printEditorSuggestions(cmd *cobra.Command, plan *adapter.Plan, targets []ad
 }
 
 var initCmd = newInitCommand()
+
+func filterValidTargets(raw []string) []string {
+	var res []string
+	for _, t := range raw {
+		trimmed := strings.TrimSpace(t)
+		if trimmed != "" {
+			res = append(res, trimmed)
+		}
+	}
+	return res
+}
 
 func init() { rootCmd.AddCommand(initCmd) }

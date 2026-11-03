@@ -72,7 +72,7 @@ logs/
 
 ### 3.1 拦截阶段与职责
 - **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify --staged`。直接从 Git Index（暂存区）提取待提交文件并通过 `git show :<path>` 针对性审查，毫秒级快速就绪，精准拦截私有密钥、超大文件、机器硬编码绝对路径、未完工占位符及 `vendor/` 污染等违规内容，工作区脏文件不产生误拦；
-- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端或检测到 Agent/CI 环境变量指纹（含 `CLAUDE_CODE`、`ANTIGRAVITY_IDE`、`CURSOR_VERSION`、`CODEX_VERSION`、`CODEX_SHELL` 等）时，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 白名单才准予进入全量验证并放行。
+- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端、检测到 Agent/CI 环境变量指纹（含 `CLAUDE_CODE`、`ANTIGRAVITY_IDE`、`CURSOR_VERSION`、`CODEX_VERSION`、`CODEX_SHELL` 等）或检测到 `AGATE_SESSION_CONTEXT` 包含执行者身份（大小写无关匹配 `runner=`/`agent=`）时，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 白名单才准予进入全量验证并放行。
 
 ### 3.2 Hook 安装与规约分发防篡改策略
 1. **非破坏性备份**：若检测到开发者已有同名 Hook，必须自动重命名备份（如 `pre-commit.agate.bak`），严禁静默覆盖；
@@ -266,3 +266,25 @@ Jev Skills 是 Agate 之外的可选判断能力，用于为语义模糊的检�
 1. **物理存储与零侵入**：视图文件固定生成于 `.ai-memory/workspaces/<target>.code-workspace`，严禁修改团队共享 `.vscode/settings.json` 或删除、移动任何物理规则文件；
 2. **精确过滤边界**：仅在当前工具窗口的 `files.exclude` 与 `search.exclude` 中隐藏其他工具的规则文件路径，保留当前工具规则及 `MAP.md`、`contexts/context.md`、`TASK.md`、`MEMORY.md`，严禁整体隐藏 `.gemini` 或 `.cursor` 目录；
 3. **显式免责声明**：CLI 必须向用户提示“隐藏仅影响当前窗口展示，不代表停止客户端加载底层物理文件”；对不支持 `.code-workspace` 的纯 CLI 工具（如 `codex`、`claude`）明确降级跳过。
+
+---
+
+## 十二、 多源身份感知与跨会话安全信封规范 (Multi-Source Context & Session Envelope)
+
+### 12.1 宿主编辑器与执行者角色解耦规范
+1. **双角色分离**：统一区分**宿主编辑器 (`Editor`)** 与**实际执行者 (`Runner`)**，禁止将仅处于某 IDE 集成终端内的普通 Shell 命令无条件等同于自动化 Agent 正在执行；
+2. **三态冲突仲裁 (`known` / `unknown` / `ambiguous`)**：全量汇总所有候选特征而非顺序短路盲选；若同一角色命中多个不同工具的强特征，状态标记为 `ambiguous` 并阻断自动回退；
+3. **装配与任务调用解耦**：`EffectiveTarget()` 用于规则装配时，优先采信已确知的 `Runner`（即使底层 `Editor` 存在历史残留冲突）；`agate task` 写命令仅采信确知的 `Runner` 身份，无确知 `Runner` 时强制要求显式传入 `--agent <name>`。
+
+### 12.2 远程服务端路径白名单与受限祖先进程探针规范
+1. **白名单路径对照**：识别 `/.cursor-server/` 与 `/.vscode-server/` 远程服务端目录特征，严格区分**当前会话专有路径变量**（如 `VSCODE_GIT_ASKPASS_NODE`、`VSCODE_IPC_HOOK_CLI`）与**全局残余 `PATH`**；纯 `PATH` 命中必须具备同厂商活跃终端互证且无多服务端并存冲突方可升级为 `known`；
+2. **受限祖先进程探针 (`ProcessInspector`)**：在 Linux 环境下沿 PPID 向上最多采集 4 层（硬上限 8 层，内置 `visited` 环路防护与多实例去重），仅读取 `/proc/<pid>/stat` 与 `/proc/<pid>/exe` 符号链接，**严禁读取完整命令行参数 (`/proc/<pid>/cmdline`)** 以防泄露命令行凭据；非 Linux 平台或权限受限时静默安全降级；
+3. **活跃进程优先约束**：当存在明确属于某编辑器的活跃父进程证据时，自动压制环境变量中跨宿主的残留会话变量与残留 `PATH` 并记录告警。
+
+### 12.3 `AGATE_SESSION_CONTEXT` 跨会话安全信封规范
+针对 SSH 远程转发、`tmux` 复用或子 Shell 丢失父级环境变量的场景，支持通过 `AGATE_SESSION_CONTEXT` 传递显式会话声明（格式：`v=1;editor=<name>;runner=<name>;src=<source>;iat=<unix>;exp=<unix>;sid=<id>`），并强制执行五重防线：
+1. **长度与格式边界**：总长度严格 `<= 512` 字节，拒绝任何缺失 `=` 的畸形片段或未知扩展字段；
+2. **版本锁定**：强制要求 `v=1`；
+3. **凭据防火墙**：内置高危键名（`token`/`key`/`secret`/`password`/`authorization`/`bearer`/`cookie`）与常见 API 密钥前缀（`sk-`/`ghp_`/`gho_`/`ak_` 等）扫描，命中即整段作废；
+4. **时效与时钟偏移强校验**：强制要求提供 `exp` 过期时间戳（允许指定 `iat`，拒绝 `exp < iat` 时序倒挂与超过 `MaxClockSkew` 的未来签发时间）；
+5. **受控来源白名单与会话隔离**：`src` 仅允许 `terminal`、`ssh`、`extension`、`ide`、`ci` 五类受控来源（拒绝 `unknown`、`custom` 或含路径/特殊字符的伪造来源）；当信封携带 `sid` 且与当前终端现场 `AGATE_SESSION_ID`/`TERM_SESSION_ID` 不一致时立即拒绝；`SessionID` 在 JSON 序列化（`json:"-"`）与 `agate detect --explain` 终端输出中强制脱敏隐藏。

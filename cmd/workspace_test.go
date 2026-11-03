@@ -135,3 +135,58 @@ func TestWorkspaceUnknownSubcommandReturnsUsageErrorExitCode2(t *testing.T) {
 		t.Fatalf("未知子命令预期返回 *UsageError (退出码 2)，实际错误类型: %T (%v)", err, err)
 	}
 }
+
+func TestWorkspaceTargetsCommaSeparationAndBlankValidation(t *testing.T) {
+	// R6-03: 测试逗号分隔参数解析、显式空白参数拦截与仅含空白配置回退默认
+	tempDir, cleanup := initWorkspaceTestRepo(t)
+	defer cleanup()
+
+	// 1. 显式空白 -t 必须报错拦截
+	for _, subcmd := range []string{"plan", "apply", "restore"} {
+		buf := new(bytes.Buffer)
+		rootCmd.SetOut(buf)
+		rootCmd.SetErr(buf)
+		flagWorkspaceTargets = ""
+		rootCmd.SetArgs([]string{"workspace", subcmd, "-t", "   "})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatalf("workspace %s 显式空白 -t 预期报错拦截，实际成功", subcmd)
+		}
+		if !strings.Contains(err.Error(), "不能为空白字符串") {
+			t.Fatalf("workspace %s 预期包含空白字符串错误，实际: %v", subcmd, err)
+		}
+	}
+
+	// 2. 逗号分隔 -t cursor,windsurf 必须正确生成两份工作区视图
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	flagWorkspaceTargets = ""
+	rootCmd.SetArgs([]string{"workspace", "apply", "-t", "cursor, windsurf"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("workspace apply -t cursor,windsurf 失败: %v", err)
+	}
+
+	cursorWS := filepath.Join(tempDir, ".ai-memory", "workspaces", "cursor.code-workspace")
+	windsurfWS := filepath.Join(tempDir, ".ai-memory", "workspaces", "windsurf.code-workspace")
+	if _, err := os.Stat(cursorWS); err != nil {
+		t.Errorf("预期生成 cursor.code-workspace: %v", err)
+	}
+	if _, err := os.Stat(windsurfWS); err != nil {
+		t.Errorf("预期生成 windsurf.code-workspace: %v", err)
+	}
+
+	// 3. 针对性 restore 单个逗号分隔目标
+	buf.Reset()
+	flagWorkspaceTargets = ""
+	rootCmd.SetArgs([]string{"workspace", "restore", "-t", "windsurf"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("workspace restore -t windsurf 失败: %v", err)
+	}
+	if _, err := os.Stat(cursorWS); err != nil {
+		t.Errorf("未指定清理 cursor 时，cursor.code-workspace 应保留: %v", err)
+	}
+	if _, err := os.Stat(windsurfWS); !os.IsNotExist(err) {
+		t.Errorf("指定清理 windsurf 时，windsurf.code-workspace 应已被清理")
+	}
+}

@@ -2,7 +2,7 @@
 
 ## 1. 核心业务与领域模型
 - **单一事实源 (SSOT)**: 核心规约由 `internal/templates/SKILL.md` 固化，通过 `pkg/adapter` 分发映射至各大 Agent 工具配置文件；支持三大规则渲染范式（`markdown` 受管区块合并、`frontmatter-md` 保留或生成 YAML Frontmatter 的 `.mdc` 规则、`pointer` 轻量寻路指针引用并内嵌规则哈希摘要），Codex 保持 `AGENTS.md` 中的既有标记；项目架构拓扑独立收敛于 `MAP.md`，与 `contexts/context.md` 构成 3-Hop 寻路双地图。来源统一不保证不同时间生成的入口或运行中会话同版。
-- **开放式智能体指纹识别 (Open Agent Fingerprinting)**: 通过 `pkg/agent` 集中感知当前环境中的内置 Agent（Codex, Cursor, Antigravity, Claude, Windsurf）、自定义扩展工具档案（支持声明 `env_keys` 强指纹与 `term_programs` 弱指纹）及 CI 自动化标志，采用进程级专属环境变量优先于宿主终端标识的两阶段探测，保障策略注入、状态机流转与 `pre-push` 防偷跑门禁的精准对接。
+- **开放式智能体指纹识别与多源身份感知 (Open Agent Fingerprinting & Multi-Source Context)**: 通过 `pkg/agent` 集中感知当前环境中的内置 Agent（Codex, Cursor, Antigravity, Claude, Windsurf）、自定义扩展工具档案、白名单远程服务端路径（`/.cursor-server/` 与 `/.vscode-server/` 对照，区分活跃会话专有变量与全局 `PATH`）、受限祖先进程链（PPID ≤ 4 层安全读取、内置 `visited` 防环与多实例去重，且活跃祖先进程自动压制跨宿主残留环境变量）及跨会话声明上下文（`AGATE_SESSION_CONTEXT`，具备长度 ≤512B、版本锁定、凭据防火墙、`exp/iat` 时效、受控 `src` 白名单 `terminal`/`ssh`/`extension`/`ide`/`ci` 与 `SessionID` 脱敏/终端一致性校验）；实现宿主编辑器（Editor）与实际执行者（Runner）的精确解耦，采用全量候选汇总与冲突检测（`known`/`unknown`/`ambiguous`），`EffectiveTarget()` 优先采信已确知的 `Runner` 而不受 `Editor` 冲突拖累，根除顺序盲猜与硬编码兜底。
 - **隐形隔离与窗口级视图过滤 (Invisible Isolation & Per-Tool Workspace View)**: AI 私有状态（`.agents/`, `.gemini/`, `.cursorrules`, `TASK.md`, `MEMORY.md`, `.agate/config.local.toml` 及自定义未跟踪规则路径等）仅注册在本地 `.git/info/exclude`，严禁污染团队公共 `.gitignore` 与 Git 提交树；同时通过 `agate workspace` 在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立的规则过滤视图，在不修改 `.vscode/settings.json` 与物理规则文件的前提下实现同仓多工具窗口展示隔离（注：隐藏仅影响当前窗口展示，不代表停止客户端加载）。
 - **闭环自检与两振熔断**: 代码变更后强制执行 `agate verify`（或 `agent-verify`），两振未果强制退出交还主控权；`--resume-after-break` 仅在当次恢复自检真正通过后才清除 `.verify_streak` 计数，若再次失败则继续维持熔断锁死。
 - **三层策略配置与安全单调收紧 (Three-Tier Config & Monotonic Tightening)**: 支持个人全局（`~/.agate/config.toml` 或 `AGATE_GLOBAL_CONFIG`）、团队项目级（`.agate/config.toml`）与本机私有（`.agate/config.local.toml`）三层配置合并；本机私有覆写对安全门禁（`guard.strict`、`hooks.install`、`guard.todo`、`guard.absolute_path`）强制执行“单调收紧（只升不降）”，严禁本机配置私自放宽团队安全红线。
@@ -12,7 +12,8 @@
 - **CLI 命令契约**:
   - `agate init [-t <工具或all>] [--dry-run] [--allow-tracked] [--no-hook]`: 先生成和展示规则分发计划，检查无冲突后才装配护栏与地图资产；`--dry-run` 不写入任何项目文件或 Git 配置；`--allow-tracked` 仅允许更新计划中已跟踪的规则，不改变提交或推送授权；
   - `agate profile [list|add <name>]`: 管理内置与开放式自定义 AI 工具档案，`add` 支持 `--path`、`--format markdown|frontmatter-md|pointer`、`--env`、`--term-program`、`--reads`、`--frontmatter`、`--global`、`--local`，未知子命令返回用法错误退出码 `2`；
-  - `agate workspace [plan|apply|restore|open <target>]`: 预览、生成、清理或直接启动 `.ai-memory/workspaces/<target>.code-workspace` 独立窗口视图，对纯 CLI 工具（`codex`、`claude`）安全降级跳过，未知子命令返回用法错误退出码 `2`；
+  - `agate detect [--explain] [--json]`: 只读诊断当前宿主编辑器、执行 Agent、白名单路径、祖先进程与网络传输环境指纹（支持 `--explain` 脱敏详细证据链与 `SessionID` 抹除防护，以及 `--json` 机器格式输出）；
+  - `agate workspace [plan|apply|restore|open <target>]`: 预览、生成、清理或直接启动 `.ai-memory/workspaces/<target>.code-workspace` 独立窗口视图（支持 `-t` 逗号分隔多目标与显式空白参数拦截），对纯 CLI 工具（`codex`、`claude`）安全降级跳过，未知子命令返回用法错误退出码 `2`；
   - `agate isolate`: 注入本地私有排除规则（17 项默认隐形隔离清单，含 `.env*` 与 `*.agate.bak`）；
   - `agate verify [--staged] [--strict] [--skip-guard] [--report] [--resume-after-break]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断，后续运行须由人类显式传入 `--resume-after-break` 且当次自检通过方可解除熔断；支持 `--report` 自动生成 HTML 审查报告；
   - `agate ci verify`: CI/远程合并门禁入口，固定启用严格校验与 HTML 审查报告，适用于 GitHub Actions、GitLab CI 等流水线；
@@ -20,7 +21,7 @@
   - `agate view`: 在系统默认浏览器中安全预览最新生成的 HTML 审查报告（Windows 下通过 `rundll32 url.dll,FileProtocolHandler` 启动，避免 `cmd.exe` 元字符注入风险）；
   - `agate scan [--write]`: 智能扫描工程技术栈与端口矩阵，支持确定性正斜杠路径排序与原子写入回填 MAP.md 与 contexts/context.md；
   - `agate hook [install|uninstall|status]`: 管理本地 Git 双重门禁（pre-commit 提纯自检 + pre-push 物理防偷跑）与状态看板，未知子命令严格返回用法错误退出码 `2`；
-  - `agate task [status|claim|handover|resume|done]`: 跨 Agent 与多角色（`--role dev|test|ops`、`--next-role`）任务接力中枢，管理 TASK.md 状态机流转、租约互斥锁、会话角色卡片（`.ai-memory/sessions/active-role.md`）、交接四要素与流转审计时间线（`handover` 与 `done` 强制联动 `.agate/config.toml` 的 `guard.strict`、Phase 0 静态审计与两振熔断，无输出失败测试同样阻断）。
+  - `agate task [status|claim|handover|resume|done]`: 跨 Agent 与多角色（`--role dev|test|ops`、`--next-role`）任务接力中枢，管理 TASK.md 状态机流转、租约互斥锁、会话角色卡片（`.ai-memory/sessions/active-role.md`）、交接四要素与流转审计时间线（全部写操作前置校验配置文件与非空白 `--agent` 参数，`handover` 与 `done` 强制联动 `.agate/config.toml` 的 `guard.strict`、Phase 0 静态审计与两振熔断，无输出失败测试同样阻断）。
 - **三态退出码契约 (Exit Code Contract)**:
   - `0` (`[PASS]`): 命令成功执行或闭环验证全部通过；
   - `1` (`[FAIL]`): 触发安全红线拦截、测试未通过、状态冲突或运行时错误；
