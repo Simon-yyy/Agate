@@ -33,6 +33,7 @@
 - **分发计划预览**：`agate init -t <工具> --dry-run`（只读展示创建、更新、跳过与冲突，列出已有入口及潜在重叠读取）；Git 已跟踪规则需要 `--allow-tracked` 明确允许更新。
 - **开放工具档案管理**：`agate profile [list|add <name>]`（支持 `--path`、`--format markdown|frontmatter-md|pointer`、`--env`、`--term-program`、`--reads`、`--frontmatter`、`--global`、`--local`，免改源码扩展任意新兴 AI 编程工具）
 - **多源环境指纹诊断**：`agate detect [--explain] [--json]`（只读诊断当前 Editor 宿主、Runner 执行者、远程白名单路径、受限祖先进程与跨会话信封状态）
+- **自然语言提示词编译**：`agate prompt "<instruction>" [-s <scope>] [--no-dirty] [--json] [--hook]`（四源物理现场动态锚定、置信度分级、显式范围纠偏与宿主模型指令执行信封编译）
 - **多工具独立窗口视图**：`agate workspace [plan|apply|restore|open <target>]`（支持 `-t cursor,antigravity,windsurf` 逗号分隔多目标或 `all`，在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立规则过滤视图，零侵入 `.vscode/settings.json`）
 - **技术拓扑回填**：`agate scan --write`（自动探测技术栈与端口，同步回填 MAP.md 与 contexts/context.md）
 - **三层策略配置**：支持 `~/.agate/config.toml`（个人全局）+ `.agate/config.toml`（团队共享）+ `.agate/config.local.toml`（本机私有覆写，安全门禁遵循单调收紧只升不降）
@@ -72,12 +73,13 @@
 - [cmd/profile.go](cmd/profile.go)：`agate profile` 命令行入口，列出与注册内置/自定义 AI 工具档案（支持项目级、本机私有与个人全局三层配置落盘）。
 - [cmd/workspace.go](cmd/workspace.go)：`agate workspace` 命令行入口，预览、生成、恢复或直接启动按工具隔离的 `.code-workspace` 独立视图窗口（支持逗号分隔 `-t` 目标列表与空白参数前置拦截）。
 - [cmd/detect.go](cmd/detect.go)：`agate detect` 命令行入口，只读诊断当前宿主编辑器（Editor）、执行 Agent（Runner）、白名单路径与网络传输环境指纹（支持 `--explain` 脱敏详细证据链及 `--json` 机器格式输出）。
+- [cmd/prompt.go](cmd/prompt.go)：`agate prompt` 命令行入口，自然语言意图物理锚定与结构化 Prompt 编译器（支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 排除无关脏文件、`--json` 结构化输出与 `--hook` 标准输入注入模式，含空指令、显式空白 `-s ""` 与孤立顶层容器目录 `pkg`/`internal` 前置拦截及 `Flag.Changed` 状态归零）。
 
 ### 2. 规约适配与分发 (`pkg/adapter/`)
 
 - [pkg/adapter/adapter.go](pkg/adapter/adapter.go)：多 Agent 目标嗅探器与规约分发器。
   - 支持内置目标：Codex (`AGENTS.md` 受管区块)、Cursor (`.cursorrules`)、Antigravity (`.gemini/GEMINI.md`)、Claude Code (`CLAUDE.md`)、Windsurf (`.windsurfrules`)，并开放支持任意声明式自定义工具档案。
-  - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源。
+  - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源，并提供历史规约陈旧模式探测（`CheckDeprecatedRulePatterns`，含旧版 `AGENTS.md` 寻路与缺失 `Intent Expansion` 告警）。
 - [pkg/adapter/plan.go](pkg/adapter/plan.go)：只读分发计划与执行、三大规则渲染范式（`markdown` 受管区块合并、`frontmatter-md` 保留或生成 YAML Frontmatter 的 `.mdc` 规则、`pointer` 轻量寻路引用引导并内嵌规则哈希摘要）、Git 跟踪保护（含大小写不敏感文件系统下基于 Git 索引与 `os.SameFile` 的物理文件校验）、路径与符号链接检查、过期快照检查、分发写入锁、双向重叠读取及正文版本诊断。诊断不等于客户端加载证明。
 
 ### 3. Git 治理与安全门禁 (`pkg/git/`)
@@ -115,7 +117,7 @@
 
 ### 8. 核心资产与模板资源 (`internal/templates/`)
 
-- [internal/templates/SKILL.md](internal/templates/SKILL.md)：单一事实源通用规约（三层门禁、3-Hop 寻路协议、两阶段交互规则、接力协议与记忆防线）。
+- [internal/templates/SKILL.md](internal/templates/SKILL.md)：单一事实源通用规约（两阶段硬门禁与指令语义扩写解码、3-Hop 寻路协议、三层门禁、接力协议与记忆防线）。
 - [internal/templates/task.tpl](internal/templates/task.tpl)：升级版 YAML Frontmatter + 接力四要素任务看板模板。
 - [internal/templates/review.html.tpl](internal/templates/review.html.tpl)：自包含 HTML 审查报告模板（零 CDN 外链依赖）。
 - [internal/templates/agents.tpl](internal/templates/agents.tpl)：架构地图骨架模板。
@@ -140,12 +142,16 @@
 
 - [pkg/workspace/workspace.go](pkg/workspace/workspace.go)：生成与清理 `.ai-memory/workspaces/<target>.code-workspace` 窗口级独立视图文件，在不触碰团队 `.vscode/settings.json` 与物理规则文件的前提下，按工具窗口过滤其他工具规则并保留当前工具规则与 `MAP.md`、`contexts/context.md`、`TASK.md`、`MEMORY.md`。
 
-### 12. 可选语义决策适配层（规划）
+### 12. 提示词物理锚定与编译器 (`pkg/prompt/`)
+
+- [pkg/prompt/compiler.go](pkg/prompt/compiler.go)：零模糊词硬编码的确定性物理锚定引擎（提取真实路径与声明模块、区分 `explicit`/`inferred_dirty`/`unresolved` 锚定置信度、支持清晰指令收敛模式与脏文件精简、支持 `--scope` 显式覆写与 `--no-dirty` 脏文件隔离、切片 `MAP.md` 关联模块、提取 `TASK.md` 断点与 `MEMORY.md` 按需准入），合成强制包含 `agate-intent` 解码块、双轨自适应分流、双通道确认与局部纠偏重锚定闭环（Correction Loop）的高密度结构化执行信封。
+
+### 13. 可选语义决策适配层（规划）
 
 - **定位**：未来以独立适配器接入已安装的 Jev Skills，为任务接力、验证失败分流和审查排序提供语义建议。
 - **边界**：Jev 只输出建议与待复核信号，不替代 `pkg/guard`、测试、Git Hook 或 CI 的确定性放行条件；尚未引入运行时代码或网络依赖。
 
-### 13. 构建与发布自动化脚本 (`scripts/`)
+### 14. 构建与发布自动化脚本 (`scripts/`)
 
 - [scripts/archive.sh](scripts/archive.sh) / [scripts/archive.ps1](scripts/archive.ps1) / [scripts/archive.cmd](scripts/archive.cmd)：跨平台零 CGO 静态交叉编译归档脚本，生成 Windows/Linux/macOS 二进制产物并校验编译失败阻断。
 - [scripts/bump.sh](scripts/bump.sh) / [scripts/bump.ps1](scripts/bump.ps1)：语义化版本号升级、源码版本常量同步与可选 Git Tag 自动化发布脚本。

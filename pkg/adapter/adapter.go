@@ -225,5 +225,8 @@ func CheckDeprecatedRulePatterns(content []byte) []string {
 	if strings.Contains(text, "AGENTS.md (架构地图)") || strings.Contains(text, "AGENTS.md 与 context.md") {
 		warnings = append(warnings, "寻路规约仍指向旧版 'AGENTS.md' 架构地图而非 'MAP.md'")
 	}
+	if strings.Contains(text, "## 2. 两阶段硬门禁 (Two-Phase Gate)") && !strings.Contains(text, "Intent Expansion") {
+		warnings = append(warnings, "第 2 条仍为旧版 '## 2. 两阶段硬门禁 (Two-Phase Gate)'，缺少 '指令语义扩写 (Intent Expansion)' 与 'agate prompt' 规范")
+	}
 	return warnings
 }

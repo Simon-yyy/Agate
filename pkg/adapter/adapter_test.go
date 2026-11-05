@@ -253,4 +253,11 @@ func TestCheckDeprecatedRulePatterns(t *testing.T) {
 	if len(warnings) != 2 {
 		t.Errorf("陈旧规约预期 2 条警告，实际得到 %d 条: %v", len(warnings), warnings)
 	}
+
+	// 3. 命中缺少 Intent Expansion 的旧版第 2 条规约
+	legacyGate := []byte("# 核心协同与安全规范 (Agate / Agent Gate)\n## 2. 两阶段硬门禁 (Two-Phase Gate)\n- 遇到任何排查...")
+	warnings = CheckDeprecatedRulePatterns(legacyGate)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "Intent Expansion") {
+		t.Errorf("旧版第 2 条规约预期触发 Intent Expansion 缺失告警，实际得到: %v", warnings)
+	}
 }

@@ -58,7 +58,8 @@
 - **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行；
 - **`pkg/agent`**：多源身份感知与冲突仲裁引擎（`context.go`、`registry.go`、`collector.go`、`session.go`），解耦宿主编辑器（Editor）与执行者（Runner），综合内置/自定义档案指纹、远程白名单路径（`/.cursor-server/`）、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封执行三态仲裁（`known`/`unknown`/`ambiguous`），并提供开放式工具档案校验（`profile.go`）；
 - **`pkg/config`**：三层策略配置中心（个人全局 `~/.agate/config.toml` + 团队项目 `.agate/config.toml` + 本机私有 `.agate/config.local.toml`），支持工具档案持久化（`UpsertProfile`）与本机安全门禁单调收紧（Monotonic Tightening）；
-- **`pkg/workspace`**：多工具窗口级独立视图引擎（`workspace.go`），在 `.ai-memory/workspaces/<target>.code-workspace` 生成独立文件树与搜索过滤视图，零侵入团队 `.vscode/settings.json`。
+- **`pkg/workspace`**：多工具窗口级独立视图引擎（`workspace.go`），在 `.ai-memory/workspaces/<target>.code-workspace` 生成独立文件树与搜索过滤视图，零侵入团队 `.vscode/settings.json`；
+- **`pkg/prompt`**：提示词物理锚定与双轨编译引擎（`compiler.go`），自动采集 Git 活跃现场、`MAP.md` 关联模块切片、`TASK.md` 在途断点与 `MEMORY.md` 准入卡片，区分 `explicit`/`inferred_dirty`/`unresolved` 三级锚定置信度，支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 脏文件隔离、清晰指令收敛模式及局部纠偏重锚定闭环（Correction Loop）。
 
 ### 2.3 底层 Git 与执行层
 - **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，采用受管标记块（Managed Block）增量原子注入，避免修改团队共用的 `.gitignore`；
@@ -75,6 +76,7 @@ agate/
 │   ├── root.go             # 根命令定义、三态退出码契约、版本信息与全局 Flag
 │   ├── init.go             # agate init 规则计划预览与护栏编排逻辑 (--dry-run, --allow-tracked)
 │   ├── detect.go           # agate detect 多源环境与身份指纹只读诊断 (--explain, --json)
+│   ├── prompt.go           # agate prompt 自然语言意图物理锚定与结构化 Prompt 编译器 (-s, --no-dirty, --json, --hook)
 │   ├── profile.go          # agate profile 开放式工具档案列表与注册 (list/add)
 │   ├── workspace.go        # agate workspace 多工具独立窗口视图管理 (plan/apply/restore/open)
 │   ├── verify.go           # agate verify 自检引擎 (--staged, --strict, --skip-guard, --report, --resume-after-break)
@@ -99,6 +101,8 @@ agate/
 │   │   └── config.go       # 全局/项目/本机三层配置合并、UpsertProfile 与安全单调收紧
 │   ├── workspace/
 │   │   └── workspace.go    # .code-workspace 独立窗口视图计划、原子生成、恢复与受控启动
+│   ├── prompt/
+│   │   └── compiler.go     # 四源物理现场采集、三级置信度判定、双轨分流与纠偏信封编译器
 │   ├── git/
 │   │   ├── exclude.go      # .git/info/exclude 受管块管理、去重与根目录寻径
 │   │   ├── hook.go         # Git Hooks 安装、激活、卸载、状态查询与防偷跑
@@ -277,6 +281,15 @@ Agate 在初始化扫描上下文时，批量执行 `git -c core.quotepath=false
 2. **远程路径与受限祖先进程印证**：区分当前会话专有路径变量（如 `VSCODE_GIT_ASKPASS_NODE`）与全局残余 `PATH`；Linux 下沿 PPID 向上受限采集最多 4 层祖先进程（内置 `visited` 防环且禁读 `cmdline`），并以活跃父进程压制跨宿主残留环境变量；
 3. **跨会话安全信封 (`AGATE_SESSION_CONTEXT`)**：支持受控来源（`terminal`/`ssh`/`extension`/`ide`/`ci`）在子会话间传递带 `exp` 时效与凭据防火墙保护的身份声明，并在 `agate detect --explain` 与 JSON 输出中自动抹除内部 `SessionID`。
 
+### 3.13 提示词物理锚定编译器与双轨纠偏门禁 (`pkg/prompt/compiler.go` & `cmd/prompt.go`)
+针对开发者在日常使用中常输入简短口语指令导致 AI 盲猜文件、或工作区残留脏文件误导 AI、或指令已清晰却被过度扩写三大痛点：
+1. **四源物理现场动态锚定**：零硬编码模糊词，确定性聚合 Git 活跃现场（分支、Commit、脏文件与 `.verify_streak` 熔断计数）、`MAP.md` 关联模块切片、`TASK.md` 非 `DONE` 在途断点与 `MEMORY.md` 精确匹配生效范围的卡片；
+2. **三级锚定置信度与清晰指令收敛**：
+   - `explicit`（高置信度）：指令包含明确路径或传入 `-s/--scope` 时，自动折叠无关工作区脏文件列表，并将 `agate-intent` 指引切换为“防画蛇添足收敛模式”（遵循最小影响原则，无额外连带直接填“无”）；
+   - `inferred_dirty`（推测兜底）：指令未指明路径且仅靠 Git 脏文件关联时，显式打上 `[推测锚定-待核验]` 警示，防止无关脏文件误导模型；
+   - `unresolved`（未决澄清）：未命中路径且无关联脏文件（或启用 `--no-dirty`）时，引导模型结合 3-Hop 双地图向用户澄清；
+3. **显式纠偏参数与局部纠偏重锚定闭环 (Correction Loop)**：支持 `-s/--scope` 强制锁定目标（拦截空白字符串与孤立顶层容器目录 `pkg`/`internal` 并自动去重）及 `--no-dirty` 排除脏文件干扰；门禁层定义“确认放行 / 局部纠偏重锚定”双通道闭环，确保用户指出解码偏差时模型重新锚定对齐而非抢跑改代码。
+
 ---
 
 ## 四、 跨平台与技术选型论证
@@ -309,7 +322,8 @@ Agate 在初始化扫描上下文时，批量执行 `git -c core.quotepath=false
 - [x] `agate export` & `agate view`：自包含 HTML 审查物证报告导出与极速预览；
 - [x] 两振熔断机制（Two-Strike Circuit Breaker）：物理失败计数器与终端红框拦截；
 - [x] `agate profile` & `agate workspace`：开放式工具档案扩展（三大规则范式、动态环境指纹嗅探、三层配置与安全单调收紧）及多工具 `.code-workspace` 窗口级独立视图隔离；
-- [x] `agate detect`：宿主 Editor 与执行 Runner 解耦、远程服务端路径白名单、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封。
+- [x] `agate detect`：宿主 Editor 与执行 Runner 解耦、远程服务端路径白名单、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封；
+- [x] `agate prompt`：四源物理现场动态锚定、三级置信度分级、清晰/模糊双轨自适应分流与局部纠偏重锚定闭环。
 
 ### Phase 3: CI/CD 接入与云端发布（部分完成）
 - [x] GitHub Actions Goreleaser 跨平台全自动发版流水线；

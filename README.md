@@ -33,6 +33,7 @@
 | **`agate init`** | 一键工程护栏挂载 | 消除配置分裂，规范项目基线 | 先生成只读规则分发计划（支持 `--dry-run` 预览与 `--allow-tracked` 跟踪保护），按受管区块合并规约至各 Agent，初始化双地图骨架（`MAP.md` + `contexts/context.md`）与本地 Git 双重门禁。 |
 | **`agate profile`** | 开放式工具档案扩展 | 免改源码兼容任意新兴 AI 编程工具 | 提供 `list` 与 `add <name>`，支持声明 `markdown`、`frontmatter-md`（`.mdc`）与 `pointer` 三大渲染范式及 `env_keys` / `term_programs` 环境指纹，支持个人全局、团队项目与本机私有三层落盘。 |
 | **`agate detect`** | 多源环境与身份指纹诊断 | 消除远程开发与多工具并存下的身份误判 | 解耦宿主编辑器（Editor）与执行 Agent（Runner），综合环境变量、远程白名单路径（`/.cursor-server/`）、受限祖先进程链与 `AGATE_SESSION_CONTEXT` 安全信封输出三态诊断（支持 `--explain` 与 `--json`）。 |
+| **`agate prompt`** | 提示词物理锚定与双轨编译器 | 解决口语化指令目标失准与过度扩写 | 自动融合 Git 活跃现场、`MAP.md` 架构切片、`TASK.md` 断点与 `MEMORY.md` 准入卡片，区分三级锚定置信度（`explicit`/`inferred_dirty`/`unresolved`），支持 `-s` 显式目标纠偏、`--no-dirty` 隔离脏文件及局部纠偏重锚定闭环。 |
 | **`agate workspace`** | 多工具独立窗口视图 | 消除同仓多工具规则并存干扰与串味 | 提供 `plan/apply/restore/open`（支持 `-t` 逗号分隔多目标），在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口级规则过滤视图，零侵入团队 `.vscode/settings.json`。 |
 | **`agate isolate`** | Git 私有隔离治理 | 杜绝 AI 私有状态污染团队仓库 | 基于原生 `.git/info/exclude` 隐形屏蔽 17 项 AI 缓存、草稿与私有配置（包含 `.env*` 与 `*.agate.bak`），不修改公共 `.gitignore`，团队零感知。 |
 | **`agate verify`** | 闭环自检物证交付 | 杜绝伪交付与无效死循环试错 | **阶段 0** 静态扫描（拦截密钥、大文件、未完工占位符等 7 大红线，支持 `--staged` 暂存区定向审查）+ **阶段 1** 优先调度自检脚本或测试套件，输出绿色 `[PASS]` 物证，连续失败触发**两振硬熔断**。 |
@@ -151,6 +152,12 @@ agate profile add continue --path .continue/rules/agate.md --format markdown
   agate detect                          # 诊断当前宿主编辑器、执行 Agent 与首选装配目标
   agate detect --explain                # 展示脱敏后的详细证据链与冲突告警
   agate detect --json                   # 输出机器可读的结构化 JSON 诊断结果
+  ```
+- **提示词物理锚定与双轨编译（`agate prompt`）**：将口语化指令与本地四源物理现场动态锚定，支持清晰指令收敛模式与局部纠偏重编：
+  ```bash
+  agate prompt "帮我改下锁超时逻辑"                           # 自动采集 Git 现场、MAP.md 切片、TASK.md 与 MEMORY.md 生成执行信封
+  agate prompt "改下锁超时逻辑" -s pkg/relay/lock.go --no-dirty # 显式锁定真实目标并排除工作区无关脏文件干扰
+  agate prompt "重构 cmd/root.go" --json                     # 输出结构化 JSON 锚定结果与置信度等级
   ```
 - **多工具独立窗口视图（`agate workspace`）**：当同一仓库并存多个工具规则时，可生成窗口级 `.code-workspace` 过滤视图，每个 IDE 窗口仅展示自身规则与共享地图，零侵入团队 `.vscode/settings.json`：
   ```bash
@@ -339,9 +346,9 @@ graph TD
     H -->|本地隔离| K[.git/info/exclude 隐形隔离私有状态]
 ```
 
-### 1. 交互硬门禁（先出方案，确认后再动代码）
-- 遇业务变更或代码修复，首轮仅输出根因分析、精简方案与拟变动文件清单；
-- 显式等待用户回复“执行”后方可在次轮动手改代码，杜绝 AI 盲目破坏业务逻辑。
+### 1. 交互硬门禁与双轨语义解码（先出方案，确认/纠偏后再动代码）
+- **模糊指令深度扩写 vs 清晰指令收敛直通**：遇未指明路径的口语化需求，先调用 `agate prompt` 锚定四源物理现场并补齐隐式工程项；遇已指明目标文件与改动逻辑的清晰指令，免调命令并遵循最小影响原则收敛展开（防过度设计）；
+- **确认与局部纠偏双通道闭环**：首轮输出 `【指令语义解码与隐式需求展开】` 与精简方案后，用户既可回复“执行”放行落盘，也可直接指出解码偏差触发重新锚定对齐，严禁 AI 带病抢跑改代码。
 
 ### 2. 自检物证与两振熔断（凭绿灯交付，拒死循环）
 - 修改代码后必须运行 `agate verify`（优先调度项目内置 `verify.sh` 或 `verify.cmd`）；
