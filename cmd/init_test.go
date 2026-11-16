@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agate/pkg/agent"
 )
 
 func TestInitCmdSuccess(t *testing.T) {
@@ -248,7 +250,7 @@ func TestInitConflictBlocksExistingEntryFallback(t *testing.T) {
 	t.Setenv("CLAUDE_CODE", "1")
 
 	// 1. 无有效目标且有冲突，禁止已有入口兜底
-	cmd := newInitCommand()
+	cmd := newInitCommandWithInspector(&stubInspector{})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -264,7 +266,7 @@ func TestInitConflictBlocksExistingEntryFallback(t *testing.T) {
 	}
 
 	// 2. R2-F01: 传入纯空白目标时，必须立即报错，禁止跳过冲突门禁
-	cmdBlank := newInitCommand()
+	cmdBlank := newInitCommandWithInspector(&stubInspector{})
 	cmdBlank.SetArgs([]string{"--no-hook", "-t", "   "})
 	errBlank := cmdBlank.Execute()
 	if errBlank == nil || !strings.Contains(errBlank.Error(), "不能为空白字符") {
@@ -274,10 +276,76 @@ func TestInitConflictBlocksExistingEntryFallback(t *testing.T) {
 	// 3. R2-F01: 配置 targets = [""] 时，无有效目标且有冲突，禁止已有入口兜底
 	_ = os.MkdirAll(filepath.Join(root, ".agate"), 0755)
 	_ = os.WriteFile(filepath.Join(root, ".agate", "config.toml"), []byte("[agent]\ntargets = [\"   \"]\n"), 0644)
-	cmdConfigBlank := newInitCommand()
+	cmdConfigBlank := newInitCommandWithInspector(&stubInspector{})
 	cmdConfigBlank.SetArgs([]string{"--no-hook"})
 	errConfigBlank := cmdConfigBlank.Execute()
 	if errConfigBlank == nil || !strings.Contains(errConfigBlank.Error(), "冲突") {
 		t.Fatalf("配置纯空白 targets 且有冲突时预期阻断报错，实际为: %v", errConfigBlank)
+	}
+}
+
+func TestInitCollectsOnceAndPreviewsDetectedEditor(t *testing.T) {
+	clearAgentEnvForTest(t)
+	root := t.TempDir()
+	emptyGlobal := filepath.Join(root, "empty.toml")
+	if err := os.WriteFile(emptyGlobal, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGATE_GLOBAL_CONFIG", emptyGlobal)
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+
+	inspector := &stubInspector{chain: []agent.ProcessInfo{{
+		PID: 4, PPID: 1, Path: `C:\Users\secret\AppData\Local\Programs\cursor\Cursor.exe`, Name: "Cursor.exe",
+	}}}
+	cmd := newInitCommandWithInspector(inspector)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("无 -t 预览失败: %v\n%s", err, out.String())
+	}
+	if inspector.calls != 1 {
+		t.Fatalf("一次 init 应只采集一次进程链，实际 %d", inspector.calls)
+	}
+	text := out.String()
+	if !strings.Contains(text, "当前 Agent 环境") || !strings.Contains(text, "cursor") {
+		t.Fatalf("应依据当前 Agent 环境选择 cursor:\n%s", text)
+	}
+	if strings.Contains(text, `C:\Users\secret`) {
+		t.Fatalf("预览泄漏安装路径:\n%s", text)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "empty.toml" {
+			t.Fatalf("dry-run 写入了 %s", entry.Name())
+		}
+	}
+
+	blocked := newInitCommandWithInspector(&stubInspector{})
+	var blockedOut bytes.Buffer
+	blocked.SetOut(&blockedOut)
+	blocked.SetErr(&blockedOut)
+	blocked.SetArgs([]string{"--dry-run"})
+	if err := blocked.Execute(); err == nil || !strings.Contains(err.Error(), "未识别当前 Agent") {
+		t.Fatalf("未知宿主应阻断，err=%v\n%s", err, blockedOut.String())
+	}
+
+	conflicted := newInitCommandWithInspector(&stubInspector{chain: []agent.ProcessInfo{
+		{PID: 2, PPID: 1, Path: `C:\Apps\Cursor.exe`, Name: "Cursor.exe"},
+		{PID: 3, PPID: 1, Path: `C:\Apps\Code.exe`, Name: "Code.exe"},
+	}})
+	if err := conflicted.Execute(); err == nil || !strings.Contains(err.Error(), "冲突") {
+		t.Fatalf("不同宿主冲突应阻断，err=%v", err)
 	}
 }

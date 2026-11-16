@@ -300,6 +300,12 @@ func TestCompilePrompt_ExplicitScopesAndIgnoreDirtyAndCorrectionProtocol(t *test
 	if !strings.Contains(resScope.CompiledPrompt, "收敛模式：仅限核对直接调用方签名与对应单测") {
 		t.Errorf("显式 explicit 模式下应包含防画蛇添足收敛提示")
 	}
+	if !strings.Contains(resScope.CompiledPrompt, "不表示根因已经查明") {
+		t.Errorf("explicit 信封必须声明目标明确不等于根因已查明")
+	}
+	if !strings.Contains(resScope.CompiledPrompt, "诊断状态") || !strings.Contains(resScope.CompiledPrompt, "排查计划") {
+		t.Errorf("信封应要求诊断状态，并区分排查计划与已证实修复")
+	}
 
 	// 2. 测试非法越界 Scopes 与孤立容器目录 pkg/internal 被拒绝
 	_, err = CompilePrompt(CompileOptions{

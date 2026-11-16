@@ -11,9 +11,6 @@ import (
 
 func clearAgentEnvForTest(t *testing.T) {
 	t.Helper()
-	// R5-05: 重置 detect 命令全局布尔 Flag，杜绝跨用例状态污染
-	flagDetectExplain = false
-	flagDetectJSON = false
 
 	for _, key := range []string{
 		"CODEX_SESSION_ID", "CODEX_THREAD_ID", "CODEX_VERSION", "CODEX_CI", "CODEX_SHELL",

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"agate/pkg/agent"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -11,17 +12,30 @@ import (
 	"time"
 )
 
+type stubInspector struct {
+	chain []agent.ProcessInfo
+	calls int
+}
+
+func (s *stubInspector) GetAncestors(pid int, maxDepth int) ([]agent.ProcessInfo, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.calls++
+	return s.chain, nil
+}
+
 func TestDetectCmdStandardAndJSON(t *testing.T) {
 	clearAgentEnvForTest(t)
 	t.Setenv("CODEX_SESSION_ID", "secret-session-id-999")
 	t.Setenv("TERM_PROGRAM", "cursor")
 
 	// 1. 测试标准与 --explain 输出
-	cmd := rootCmd
+	cmd := newDetectCommand(&stubInspector{})
 	var outBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&outBuf)
-	cmd.SetArgs([]string{"detect", "--explain"})
+	cmd.SetArgs([]string{"--explain"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("detect --explain 执行失败: %v", err)
@@ -43,7 +57,7 @@ func TestDetectCmdStandardAndJSON(t *testing.T) {
 	var jsonBuf bytes.Buffer
 	cmd.SetOut(&jsonBuf)
 	cmd.SetErr(&jsonBuf)
-	cmd.SetArgs([]string{"detect", "--json"})
+	cmd.SetArgs([]string{"--json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("detect --json 执行失败: %v", err)
@@ -73,11 +87,11 @@ func TestDetectCmdConflictOutput(t *testing.T) {
 	t.Setenv("CODEX_SESSION_ID", "1")
 	t.Setenv("CLAUDE_CODE", "1")
 
-	cmd := rootCmd
+	cmd := newDetectCommand(&stubInspector{})
 	var jsonBuf bytes.Buffer
 	cmd.SetOut(&jsonBuf)
 	cmd.SetErr(&jsonBuf)
-	cmd.SetArgs([]string{"detect", "--json"})
+	cmd.SetArgs([]string{"--json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("detect --json 失败: %v", err)
@@ -99,11 +113,11 @@ func TestDetectCmdSessionContextPassing(t *testing.T) {
 	exp := time.Now().Add(time.Hour).Unix()
 	t.Setenv("AGATE_SESSION_CONTEXT", fmt.Sprintf("v=1;editor=cursor;runner=codex;sid=/home/user/myproject/session-123;src=terminal;exp=%d", exp))
 
-	cmd := rootCmd
+	cmd := newDetectCommand(&stubInspector{})
 	var jsonBuf bytes.Buffer
 	cmd.SetOut(&jsonBuf)
 	cmd.SetErr(&jsonBuf)
-	cmd.SetArgs([]string{"detect", "--json"})
+	cmd.SetArgs([]string{"--json"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("detect --json 失败: %v", err)
@@ -139,11 +153,11 @@ func TestDetectCmdConfigErrorExposed(t *testing.T) {
 	_ = os.Chdir(dir)
 	defer func() { _ = os.Chdir(orig) }()
 
-	cmd := rootCmd
+	cmd := newDetectCommand(&stubInspector{})
 	var outBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&outBuf)
-	cmd.SetArgs([]string{"detect"})
+	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
 	// RD-S03: 配置损坏时必须报错，绝不吞掉错误假装成功
@@ -153,10 +167,10 @@ func TestDetectCmdConfigErrorExposed(t *testing.T) {
 
 	// R3-S01: 错误输出与 JSON 模式下绝不回显配置文件私有路径
 	var jsonBuf bytes.Buffer
-	cmdJSON := rootCmd
+	cmdJSON := newDetectCommand(&stubInspector{})
 	cmdJSON.SetOut(&jsonBuf)
 	cmdJSON.SetErr(&jsonBuf)
-	cmdJSON.SetArgs([]string{"detect", "--json"})
+	cmdJSON.SetArgs([]string{"--json"})
 	_ = cmdJSON.Execute()
 
 	jsonStr := jsonBuf.String()
@@ -206,10 +220,10 @@ term_programs = ["term_conflict"]
 
 	// 1. JSON 模式
 	var jsonBuf bytes.Buffer
-	cmd := rootCmd
+	cmd := newDetectCommand(&stubInspector{})
 	cmd.SetOut(&jsonBuf)
 	cmd.SetErr(&jsonBuf)
-	cmd.SetArgs([]string{"detect", "--json"})
+	cmd.SetArgs([]string{"--json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("detect --json 失败: %v", err)
 	}
@@ -230,15 +244,66 @@ term_programs = ["term_conflict"]
 	t.Setenv("CODEX_SESSION_ID", "1")
 	t.Setenv("TERM_PROGRAM", "term_conflict")
 	var textBuf bytes.Buffer
-	cmdText := rootCmd
+	cmdText := newDetectCommand(&stubInspector{})
 	cmdText.SetOut(&textBuf)
 	cmdText.SetErr(&textBuf)
-	cmdText.SetArgs([]string{"detect"})
+	cmdText.SetArgs([]string{})
 	if err := cmdText.Execute(); err != nil {
 		t.Fatalf("detect 文本模式失败: %v", err)
 	}
 	textOut := textBuf.String()
 	if !strings.Contains(textOut, "首选装配目标:") || !strings.Contains(textOut, "codex") {
 		t.Fatalf("文本模式首选装配目标应包含 codex，实际输出:\n%s", textOut)
+	}
+}
+
+func TestDetectExplainAndJSONHideProcessInstallPath(t *testing.T) {
+	clearAgentEnvForTest(t)
+	secretPath := `C:\Users\secret\AppData\Local\Programs\cursor\Cursor.exe`
+	inspector := &stubInspector{chain: []agent.ProcessInfo{{
+		PID: 15, PPID: 1, Path: secretPath, Name: "Cursor.exe",
+	}}}
+	cmd := newDetectCommand(inspector)
+	var explainBuf bytes.Buffer
+	cmd.SetOut(&explainBuf)
+	cmd.SetErr(&explainBuf)
+	cmd.SetArgs([]string{"--explain"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("detect --explain 失败: %v", err)
+	}
+	explainOut := explainBuf.String()
+	if !strings.Contains(explainOut, "process") || !strings.Contains(explainOut, "pid_15") || !strings.Contains(explainOut, "Cursor.exe") {
+		t.Fatalf("explain 应展示进程名、PID 和匹配原因:\n%s", explainOut)
+	}
+	if strings.Contains(explainOut, `C:\Users\secret`) {
+		t.Fatalf("explain 泄漏了安装路径:\n%s", explainOut)
+	}
+
+	jsonCmd := newDetectCommand(inspector)
+	var jsonBuf bytes.Buffer
+	jsonCmd.SetOut(&jsonBuf)
+	jsonCmd.SetErr(&jsonBuf)
+	jsonCmd.SetArgs([]string{"--json"})
+	if err := jsonCmd.Execute(); err != nil {
+		t.Fatalf("detect --json 失败: %v", err)
+	}
+	if strings.Contains(jsonBuf.String(), `C:\Users\secret`) {
+		t.Fatalf("json 泄漏了安装路径:\n%s", jsonBuf.String())
+	}
+	var parsed detectJSONOutput
+	if err := json.Unmarshal(jsonBuf.Bytes(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range parsed.Evidences {
+		if ev.Source == "process" && ev.TargetRole == "editor" && ev.TargetAgent == "cursor" {
+			found = true
+		}
+	}
+	if !found || parsed.Editor != "cursor" {
+		t.Fatalf("json 应记录 cursor 进程证据，editor=%s evidences=%+v", parsed.Editor, parsed.Evidences)
+	}
+	if len(parsed.Warnings) == 0 && inspector.calls != 2 {
+		t.Fatalf("两次命令应各自采集，实际调用 %d", inspector.calls)
 	}
 }

@@ -196,7 +196,7 @@ func InspectContextFull(getenv func(string) string, termProgram string, gitIPC s
 	}
 
 	// 5. 采集受限祖先进程链特征 (ProcessInspector)
-	procEvidences, procWarnings := InspectProcessAncestors(inspector, 0, 4)
+	procEvidences, procWarnings := InspectProcessAncestors(inspector, 0, defaultAncestorDepth())
 	ctx.Warnings = append(ctx.Warnings, procWarnings...)
 	for _, ev := range procEvidences {
 		ctx.Evidences = append(ctx.Evidences, ev)
@@ -469,12 +469,16 @@ func IsAutomationEnvironment(getenv func(string) string) bool {
 
 // IsAutomationEnvironmentWithProfiles 判断当前进程是否带有内置或自定义自动化 Agent/CI 指纹。
 func IsAutomationEnvironmentWithProfiles(getenv func(string) string, custom map[string]Profile) bool {
+	return isAutomationEnvironmentFull(getenv, custom, nil)
+}
+
+func isAutomationEnvironmentFull(getenv func(string) string, custom map[string]Profile, inspector ProcessInspector) bool {
 	if getenv == nil {
 		return false
 	}
 	if getenv("CI") != "" || getenv("GITHUB_ACTIONS") != "" {
 		return true
 	}
-	ctx := InspectContext(getenv, "", "", custom)
+	ctx := InspectContextFull(getenv, "", "", custom, inspector, time.Now())
 	return ctx.RunnerStatus == StatusKnown || ctx.RunnerStatus == StatusAmbiguous
 }

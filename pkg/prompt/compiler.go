@@ -731,13 +731,20 @@ func buildCompiledPrompt(res *CompileResult, hookMode bool) string {
 	sb.WriteString(fmt.Sprintf("1. 原始指令: %s\n", strconv.Quote(singleLineInstr)))
 	if res.AnchorConfidence == ConfidenceExplicit {
 		sb.WriteString("2. 物理目标锚定: <指令已明确目标，锁定目标文件/模块，遵循最小影响原则，严禁借机扩大范围>\n")
+		sb.WriteString("   锚定置信度为 explicit 只表示目标文件或模块已经明确，不表示根因已经查明。\n")
 		sb.WriteString("3. 隐式关联展开: <收敛模式：仅限核对直接调用方签名与对应单测；若无连带影响请填“无（指令边界已明确）”，严禁过度设计>\n")
 	} else {
 		sb.WriteString("2. 物理目标锚定: <明确拟修改的文件或模块；若信封为 inferred_dirty 且与指令语义不符，须主动剔除无关脏文件并按 MAP.md 修正或向用户反问>\n")
 		sb.WriteString("3. 隐式关联展开: <主动补齐调用方兼容性、入参校验、异常分支、配置与契约同步等隐含工程项>\n")
 	}
-	sb.WriteString("4. 动作分级: <[A 级：只读探查] | [C 级：核心修改-需出 Plan 待确认]>\n")
+	sb.WriteString("4. 动作分级: <[A 级：只读探查] | [B 级：低风险实施] | [C 级：核心修改-需出 Plan 待确认]>\n")
+	sb.WriteString("5. 任务意图: <分析 | 修复 | 新功能或明确改动 | 纠偏 | 确认>。任务意图与锚定置信度分开填写。\n")
+	sb.WriteString("6. 诊断状态: <未诊断 | 待验证假设 | 已形成有证据的诊断结论 | 不适用>\n")
 	sb.WriteString("```\n\n")
+	sb.WriteString("### 诊断交付（进入修复方案之前）\n")
+	sb.WriteString("新任务或改变目标时重新确认目标和动作类型。普通状态询问不重复完整流程。纠偏要重新核对目标与已有证据。用户确认只沿用被确认方案的范围，不把“执行”当成新故障，也不扩大授权。\n")
+	sb.WriteString("分析、排查、询问原因：只读检查后给出诊断结论，不强制请求实施确认。原因未明时给出假设、支持或反对证据以及下一项检查，这时交付的是排查计划。新功能或已经明确的改动只需说明现状与预期，不虚构故障。明确指定文件时可以不手动调用 `agate prompt`，仍要说明故障原因。\n")
+	sb.WriteString("故障类请求在修复方案前写出：现象与预期、问题位置和证据（区分观察与推断）、因果解释、不确定项、方案依据。只有解码标题、explicit 或一份 Plan，都不能把诊断状态写成已形成有证据的诊断结论。\n\n")
 	sb.WriteString("### 局部纠偏与重锚定闭环 (Correction Loop)\n")
 	sb.WriteString("1. **首轮双通道门禁提示**：\n")
 	sb.WriteString("   - 若为修改任务，首轮末尾必须显式输出：\n")

@@ -2,10 +2,9 @@ package agent
 
 import (
 	"fmt"
-	"os"
+	"path"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -22,97 +21,46 @@ type ProcessInspector interface {
 	GetAncestors(pid int, maxDepth int) ([]ProcessInfo, error)
 }
 
-// DefaultProcessInspector 系统默认进程探测器。
+// DefaultProcessInspector 系统默认进程探测器。具体采集按平台编译。
 type DefaultProcessInspector struct{}
 
-// GetAncestors 沿当前进程向上采集有限祖先进程链（最大深度受限，不读取完整命令行）。
-func (d *DefaultProcessInspector) GetAncestors(pid int, maxDepth int) ([]ProcessInfo, error) {
-	if maxDepth <= 0 {
-		maxDepth = 4
+const maxAncestorDepth = 8
+
+// defaultAncestorDepth 按平台选择默认采集深度。Windows 覆盖更深的本地宿主链，Linux 保持原有 4 层。
+func defaultAncestorDepth() int {
+	if runtime.GOOS == "windows" {
+		return maxAncestorDepth
 	}
-	if maxDepth > 8 {
-		maxDepth = 8 // 硬上限防御
-	}
-
-	if runtime.GOOS != "linux" {
-		// 非 Linux 平台安全降级，不请求提权，不执行外部 shell
-		return nil, nil
-	}
-
-	var chain []ProcessInfo
-	currPID := pid
-	if currPID <= 0 {
-		currPID = os.Getpid()
-	}
-
-	for depth := 0; depth < maxDepth; depth++ {
-		if currPID <= 1 {
-			break
-		}
-
-		info, err := readLinuxProcInfo(currPID)
-		if err != nil {
-			// 进程已退出或容器限制不可读时安全截断返回
-			break
-		}
-
-		chain = append(chain, info)
-		if info.PPID <= 1 || info.PPID == currPID {
-			break
-		}
-		currPID = info.PPID
-	}
-
-	return chain, nil
+	return 4
 }
 
-// readLinuxProcInfo 读取指定 PID 的父进程及可执行文件路径（仅通过 /proc 内部接口）。
-func readLinuxProcInfo(pid int) (ProcessInfo, error) {
-	statPath := fmt.Sprintf("/proc/%d/stat", pid)
-	data, err := os.ReadFile(statPath)
-	if err != nil {
-		return ProcessInfo{}, err
+// normalizeAncestorDepth 把非正深度换成平台默认值，并执行硬上限。
+func normalizeAncestorDepth(maxDepth int) int {
+	if maxDepth <= 0 {
+		maxDepth = defaultAncestorDepth()
 	}
-
-	// /proc/[pid]/stat 格式形如: pid (comm) state ppid ...
-	statStr := string(data)
-	closeParen := strings.LastIndex(statStr, ")")
-	if closeParen < 0 || closeParen+2 >= len(statStr) {
-		return ProcessInfo{}, fmt.Errorf("无法解析 /proc/%d/stat", pid)
+	if maxDepth > maxAncestorDepth {
+		maxDepth = maxAncestorDepth
 	}
+	return maxDepth
+}
 
-	comm := ""
-	openParen := strings.Index(statStr, "(")
-	if openParen >= 0 && openParen < closeParen {
-		comm = statStr[openParen+1 : closeParen]
+// matchLocalEditorProcess 按已确认的本地可执行文件名识别 Editor。
+// 只接受当前祖先进程上的完整路径，目录名或近似文件名不算命中。
+func matchLocalEditorProcess(info ProcessInfo) (string, bool) {
+	if strings.TrimSpace(info.Path) == "" {
+		return "", false
 	}
-
-	rest := strings.Fields(statStr[closeParen+2:])
-	if len(rest) < 2 {
-		return ProcessInfo{}, fmt.Errorf("/proc/%d/stat 字段不完整", pid)
+	normalized := strings.ReplaceAll(info.Path, "\\", "/")
+	base := strings.ToLower(path.Base(normalized))
+	switch base {
+	case "cursor.exe":
+		return "cursor", true
+	case "code.exe", "code - insiders.exe":
+		return "vscode", true
+	default:
+		return "", false
 	}
-
-	ppid, err := strconv.Atoi(rest[1])
-	if err != nil {
-		ppid = 0
-	}
-
-	exePath := ""
-	if target, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
-		exePath = target
-	}
-
-	name := comm
-	if exePath != "" {
-		name = filepath.Base(exePath)
-	}
-
-	return ProcessInfo{
-		PID:  pid,
-		PPID: ppid,
-		Path: exePath,
-		Name: name,
-	}, nil
 }
 
 // PathWhitelistRule 远程白名单路径特征规则。
@@ -257,24 +205,47 @@ func InspectProcessAncestors(inspector ProcessInspector, pid int, maxDepth int) 
 	ancestors, err := inspector.GetAncestors(pid, maxDepth)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("祖先进程探测降级: %v", err))
-		return evidences, warnings
 	}
 
-	for _, p := range ancestors {
-		if p.Path == "" {
-			continue
-		}
-		if rule, ok := MatchPathWhitelist(p.Path); ok {
-			evidences = append(evidences, Evidence{
-				Source:      EvidenceSourceProcess,
-				Key:         fmt.Sprintf("pid_%d", p.PID),
-				TargetRole:  rule.Role,
-				TargetAgent: rule.Agent,
-				Matched:     true,
-				Description: fmt.Sprintf("祖先进程 [%d:%s] %s", p.PID, p.Name, rule.Description),
-			})
+	for level, p := range ancestors {
+		ev, ok := evidenceFromAncestor(p, level)
+		if ok {
+			evidences = append(evidences, ev)
 		}
 	}
 
 	return evidences, warnings
+}
+
+// evidenceFromAncestor 把已核验路径转成 Editor 证据。说明只保留进程名、PID、层级和匹配原因。
+func evidenceFromAncestor(p ProcessInfo, level int) (Evidence, bool) {
+	if strings.TrimSpace(p.Path) == "" {
+		return Evidence{}, false
+	}
+	if agentName, ok := matchLocalEditorProcess(p); ok {
+		return Evidence{
+			Source:      EvidenceSourceProcess,
+			Key:         fmt.Sprintf("pid_%d", p.PID),
+			TargetRole:  "editor",
+			TargetAgent: agentName,
+			Matched:     true,
+			Description: fmt.Sprintf("祖先进程 [%d:%s] 第 %d 级精确匹配本地可执行文件", p.PID, filepath.Base(strings.ReplaceAll(p.Path, "\\", "/")), level),
+		}, true
+	}
+	rule, ok := MatchPathWhitelist(p.Path)
+	if !ok {
+		return Evidence{}, false
+	}
+	name := p.Name
+	if name == "" {
+		name = filepath.Base(strings.ReplaceAll(p.Path, "\\", "/"))
+	}
+	return Evidence{
+		Source:      EvidenceSourceProcess,
+		Key:         fmt.Sprintf("pid_%d", p.PID),
+		TargetRole:  rule.Role,
+		TargetAgent: rule.Agent,
+		Matched:     true,
+		Description: fmt.Sprintf("祖先进程 [%d:%s] 第 %d 级%s", p.PID, name, level, rule.Description),
+	}, true
 }

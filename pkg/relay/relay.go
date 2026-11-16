@@ -128,6 +128,10 @@ func ComputeWorkspaceDigest(root string) string {
 // DetectCurrentAgent 智能嗅探当前执行环境对应的 Agent 名称。
 // 若无法确定当前调用者身份，严格返回 ""，不依赖历史任务与硬编码猜测。
 func DetectCurrentAgent(rootDir string) string {
+	return detectCurrentAgentWithInspector(rootDir, nil)
+}
+
+func detectCurrentAgentWithInspector(rootDir string, inspector agentinfo.ProcessInspector) string {
 	if rootDir == "" {
 		rootDir = "."
 	}
@@ -142,7 +146,7 @@ func DetectCurrentAgent(rootDir string) string {
 	}
 
 	// 1. 环境变量与活动终端优先探测（含自定义工具档案的 env_keys / term_programs）
-	ctx := agentinfo.InspectContext(os.Getenv, termProgram, gitIpc, profiles)
+	ctx := agentinfo.InspectContextFull(os.Getenv, termProgram, gitIpc, profiles, inspector, time.Now())
 	// R2-F02 闭环：任务调用者与装配目标严格解耦。
 	// 仅依据现场确凿的执行者（Runner）作为任务调用者，严禁将宿主编辑器（Editor）无条件升级为任务执行者。
 	// 若无确凿 Runner 强指纹，严格返回空字符串，要求人类显式传入 --agent <name>。

@@ -56,10 +56,10 @@
 - **`pkg/reporter`**：自包含单文件 HTML 审查报告引擎，汇聚已脱敏安全审计、Diff 对比、任务看板与物证日志（区分“未执行动态测试”与“动态测试未通过”），支持跨平台浏览器安全唤起；
 - **`pkg/harness`**：地图骨架生成器、跨平台文件操作、相对路径自适应软链回退与真原子写入机制；
 - **`internal/templates`**：通过 `go:embed` 将标准规约、地图骨架、任务模板与审查 HTML 模板固化进可执行二进制中，支持脱网离线运行；
-- **`pkg/agent`**：多源身份感知与冲突仲裁引擎（`context.go`、`registry.go`、`collector.go`、`session.go`），解耦宿主编辑器（Editor）与执行者（Runner），综合内置/自定义档案指纹、远程白名单路径（`/.cursor-server/`）、受限祖先进程探针与 `AGATE_SESSION_CONTEXT` 跨会话安全信封执行三态仲裁（`known`/`unknown`/`ambiguous`），并提供开放式工具档案校验（`profile.go`）；
+- **`pkg/agent`**：多源身份感知与冲突仲裁引擎（`context.go`、`registry.go`、`collector.go`、`collector_windows.go`、`collector_linux.go`、`collector_other.go`、`session.go`），解耦宿主编辑器（Editor）与执行者（Runner），综合内置/自定义档案指纹、远程白名单路径（`/.cursor-server/`）、跨平台受限祖先进程探针（Windows 采用 8 层深度 ToolHelp 进程快照/Unicode 路径/防环/PID 复用校验，精确匹配 `Cursor.exe`、`Code.exe`、`Code - Insiders.exe` 并脱敏；Linux 保持 4 层 `/proc`）与 `AGATE_SESSION_CONTEXT` 跨会话安全信封执行三态仲裁（`known`/`unknown`/`ambiguous`），并提供开放式工具档案校验（`profile.go`）；
 - **`pkg/config`**：三层策略配置中心（个人全局 `~/.agate/config.toml` + 团队项目 `.agate/config.toml` + 本机私有 `.agate/config.local.toml`），支持工具档案持久化（`UpsertProfile`）与本机安全门禁单调收紧（Monotonic Tightening）；
 - **`pkg/workspace`**：多工具窗口级独立视图引擎（`workspace.go`），在 `.ai-memory/workspaces/<target>.code-workspace` 生成独立文件树与搜索过滤视图，零侵入团队 `.vscode/settings.json`；
-- **`pkg/prompt`**：提示词物理锚定与双轨编译引擎（`compiler.go`），自动采集 Git 活跃现场、`MAP.md` 关联模块切片、`TASK.md` 在途断点与 `MEMORY.md` 准入卡片，区分 `explicit`/`inferred_dirty`/`unresolved` 三级锚定置信度，支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 脏文件隔离、清晰指令收敛模式及局部纠偏重锚定闭环（Correction Loop）。
+- **`pkg/prompt`**：提示词物理锚定、双轨编译与宿主原生 Hook 引擎（`compiler.go`、`cursor_hook.go`、`workflow.go`），自动采集 Git 活跃现场、`MAP.md` 关联模块切片、`TASK.md` 在途断点与 `MEMORY.md` 准入卡片，区分 `explicit`/`inferred_dirty`/`unresolved` 三级锚定置信度，支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 脏文件隔离、清晰指令收敛模式、Cursor 原生事件闭环（上下文产物落盘与精确读取校验）及诊断五要素结构化校验（`ValidateDiagnosisOutput` / `UpdateDiagnosisState`）。
 
 ### 2.3 底层 Git 与执行层
 - **隐形隔离机制**：利用 Git 内置的 `.git/info/exclude` 本地私有忽略文件，采用受管标记块（Managed Block）增量原子注入，避免修改团队共用的 `.gitignore`；
@@ -76,7 +76,7 @@ agate/
 │   ├── root.go             # 根命令定义、三态退出码契约、版本信息与全局 Flag
 │   ├── init.go             # agate init 规则计划预览与护栏编排逻辑 (--dry-run, --allow-tracked)
 │   ├── detect.go           # agate detect 多源环境与身份指纹只读诊断 (--explain, --json)
-│   ├── prompt.go           # agate prompt 自然语言意图物理锚定与结构化 Prompt 编译器 (-s, --no-dirty, --json, --hook)
+│   ├── prompt.go           # agate prompt 物理锚定、信封编译、原生 Hook 模式与诊断状态更新 (--hook, --host, --event, --set-diagnosis)
 │   ├── profile.go          # agate profile 开放式工具档案列表与注册 (list/add)
 │   ├── workspace.go        # agate workspace 多工具独立窗口视图管理 (plan/apply/restore/open)
 │   ├── verify.go           # agate verify 自检引擎 (--staged, --strict, --skip-guard, --report, --resume-after-break)
@@ -94,7 +94,10 @@ agate/
 │   ├── agent/
 │   │   ├── context.go      # Editor/Runner 角色解耦、三态模型与 DetectionContext 证据容器
 │   │   ├── registry.go     # 全候选汇总、多源证据分级与冲突仲裁引擎 (InspectContext / DetectEnvironmentFull)
-│   │   ├── collector.go    # 受限祖先进程链探测器 (/proc 安全解析与防环) 与远程白名单路径匹配器
+│   │   ├── collector.go    # 跨平台祖先进程接口、本地 Editor 精确匹配与远程白名单路径特征
+│   │   ├── collector_windows.go # Windows 原生 ToolHelp 进程快照 (8 层上限/防环/PID 复用/Unicode 路径)
+│   │   ├── collector_linux.go   # Linux /proc 受限祖先进程链探测 (保持 4 层)
+│   │   ├── collector_other.go   # 其余平台安全降级实现
 │   │   ├── session.go      # AGATE_SESSION_CONTEXT 跨会话安全信封解析器与五重校验防线
 │   │   └── profile.go      # 内置与开放式工具档案、三大格式范式、跨平台路径边界与碰撞校验
 │   ├── config/
@@ -102,7 +105,9 @@ agate/
 │   ├── workspace/
 │   │   └── workspace.go    # .code-workspace 独立窗口视图计划、原子生成、恢复与受控启动
 │   ├── prompt/
-│   │   └── compiler.go     # 四源物理现场采集、三级置信度判定、双轨分流与纠偏信封编译器
+│   │   ├── compiler.go     # 四源物理现场采集、三级置信度判定、双轨分流与纠偏信封编译器
+│   │   ├── cursor_hook.go  # Cursor 原生 Hook 适配器 (beforeSubmitPrompt / preToolUse / postToolUse 闭环)
+│   │   └── workflow.go     # 上下文产物落盘、会话活跃指针、诊断五要素结构化校验与状态机
 │   ├── git/
 │   │   ├── exclude.go      # .git/info/exclude 受管块管理、去重与根目录寻径
 │   │   ├── hook.go         # Git Hooks 安装、激活、卸载、状态查询与防偷跑

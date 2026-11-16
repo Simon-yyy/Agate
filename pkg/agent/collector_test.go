@@ -2,22 +2,29 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
 type mockProcessInspector struct {
-	chain []ProcessInfo
-	err   error
+	chain         []ProcessInfo
+	err           error
+	returnPartial bool
+	calls         int
+	lastDepth     int
 }
 
 func (m *mockProcessInspector) GetAncestors(pid int, maxDepth int) ([]ProcessInfo, error) {
-	if m.err != nil {
+	m.calls++
+	m.lastDepth = maxDepth
+	chain := m.chain
+	if maxDepth > 0 && len(chain) > maxDepth {
+		chain = chain[:maxDepth]
+	}
+	if m.err != nil && !m.returnPartial {
 		return nil, m.err
 	}
-	if maxDepth > 0 && len(m.chain) > maxDepth {
-		return m.chain[:maxDepth], nil
-	}
-	return m.chain, nil
+	return chain, m.err
 }
 
 func TestMatchPathWhitelist(t *testing.T) {
@@ -117,6 +124,101 @@ func TestInspectProcessAncestors(t *testing.T) {
 	}
 	if evs[0].TargetAgent != "cursor" || evs[0].Key != "pid_99" {
 		t.Errorf("意外的进程证据: %+v", evs[0])
+	}
+}
+
+func TestInspectProcessAncestors_LocalEditors(t *testing.T) {
+	tests := []struct {
+		name      string
+		chain     []ProcessInfo
+		wantAgent string
+		wantHit   bool
+	}{
+		{
+			name: "本地 Cursor.exe 生成 Editor 证据",
+			chain: []ProcessInfo{
+				{PID: 20, PPID: 10, Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, Name: "powershell.exe"},
+				{PID: 10, PPID: 1, Path: `C:\Users\dev\AppData\Local\Programs\cursor\Cursor.exe`, Name: "Cursor.exe"},
+			},
+			wantAgent: "cursor",
+			wantHit:   true,
+		},
+		{
+			name: "本地 Code.exe 识别为 vscode",
+			chain: []ProcessInfo{
+				{PID: 11, PPID: 1, Path: `D:\Program Files\Microsoft VS Code\Code.exe`, Name: "Code.exe"},
+			},
+			wantAgent: "vscode",
+			wantHit:   true,
+		},
+		{
+			name: "Code - Insiders.exe 识别为 vscode",
+			chain: []ProcessInfo{
+				{PID: 12, PPID: 1, Path: `D:\VS Code Insiders\Code - Insiders.exe`, Name: "Code - Insiders.exe"},
+			},
+			wantAgent: "vscode",
+			wantHit:   true,
+		},
+		{
+			name: "普通 PowerShell 不产生宿主证据",
+			chain: []ProcessInfo{
+				{PID: 30, PPID: 1, Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, Name: "powershell.exe"},
+			},
+		},
+		{
+			name: "路径包含 cursor 但不是编辑器可执行文件",
+			chain: []ProcessInfo{
+				{PID: 31, PPID: 1, Path: `D:\projects\cursor-helper.exe`, Name: "cursor-helper.exe"},
+			},
+		},
+		{
+			name: "node.exe 即使位于 cursor 目录也不命中",
+			chain: []ProcessInfo{
+				{PID: 32, PPID: 1, Path: `C:\Program Files\cursor\resources\app\node.exe`, Name: "node.exe"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evs, warnings := InspectProcessAncestors(&mockProcessInspector{chain: tt.chain}, 0, 8)
+			if len(warnings) != 0 {
+				t.Fatalf("不应产生警告: %v", warnings)
+			}
+			if !tt.wantHit {
+				if len(evs) != 0 {
+					t.Fatalf("不应产生宿主证据，实际: %+v", evs)
+				}
+				return
+			}
+			if len(evs) != 1 {
+				t.Fatalf("预期 1 条 Editor 证据，实际: %+v", evs)
+			}
+			ev := evs[0]
+			if ev.TargetAgent != tt.wantAgent || ev.TargetRole != "editor" || ev.Source != EvidenceSourceProcess {
+				t.Fatalf("证据归属不符: %+v", ev)
+			}
+			if strings.Contains(ev.Description, `C:\Users`) || strings.Contains(ev.Description, `D:\`) {
+				t.Fatalf("证据说明不应包含完整安装路径: %s", ev.Description)
+			}
+		})
+	}
+}
+
+func TestInspectProcessAncestors_PartialChainKept(t *testing.T) {
+	mock := &mockProcessInspector{
+		returnPartial: true,
+		err:           errors.New("父进程已退出"),
+		chain: []ProcessInfo{
+			{PID: 10, PPID: 1, Path: `C:\Users\dev\AppData\Local\Programs\cursor\Cursor.exe`, Name: "Cursor.exe"},
+		},
+	}
+	evs, warnings := InspectProcessAncestors(mock, 10, 8)
+	if len(evs) != 1 || evs[0].TargetAgent != "cursor" {
+		t.Fatalf("已核验节点应保留，实际证据: %+v", evs)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "父进程已退出") {
+		t.Fatalf("应记录降级警告，实际: %v", warnings)
 	}
 }
 

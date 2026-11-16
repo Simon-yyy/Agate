@@ -22,3 +22,4 @@ dist/
 # OS / Editor files
 .DS_Store
 Thumbs.db
+.codex/

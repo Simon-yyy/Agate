@@ -260,4 +260,25 @@ func TestCheckDeprecatedRulePatterns(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "Intent Expansion") {
 		t.Errorf("旧版第 2 条规约预期触发 Intent Expansion 缺失告警，实际得到: %v", warnings)
 	}
+
+	// 4. 命中把只读排查直接推向 Plan 输出的旧规约
+	legacyPlan := []byte("## 2. Intent Expansion\n遇到任何排查、探查、修复或业务修改任务，首轮仅输出指令解码分析、精简方案")
+	warnings = CheckDeprecatedRulePatterns(legacyPlan)
+	if len(warnings) < 2 {
+		t.Errorf("旧版直接出方案及缺失诊断连续性规约预期触发至少 2 条警告，实际得到: %v", warnings)
+	}
+}
+
+func TestPreviewRuleDriftDoesNotImplyRewrite(t *testing.T) {
+	global := []byte("# 核心协同与安全规范 (ai-dev-harness)\n## 2. 两阶段硬门禁 (Two-Phase Gate)\n- 遇到任何排查就输出方案")
+	bundled := []byte("诊断状态\nIntent Expansion")
+	notes := PreviewRuleDrift(global, bundled)
+	if len(notes) < 2 {
+		t.Fatalf("应同时报告旧门禁和缺少诊断状态，实际: %v", notes)
+	}
+	for _, note := range notes {
+		if !strings.Contains(note, "不会覆写") {
+			t.Fatalf("差异预览必须声明不覆写用户文件: %s", note)
+		}
+	}
 }

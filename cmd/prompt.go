@@ -3,9 +3,12 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
+	"agate/pkg/git"
 	"agate/pkg/prompt"
 
 	"github.com/spf13/cobra"
@@ -38,7 +41,12 @@ TASK.md 任务看板与 MEMORY.md 避坑卡片进行确定性动态锚定，生�
 			_ = cmd.Flags().Set("json", "false")
 			_ = cmd.Flags().Set("hook", "false")
 			_ = cmd.Flags().Set("no-dirty", "false")
-			for _, name := range []string{"json", "hook", "scope", "no-dirty"} {
+			_ = cmd.Flags().Set("host", "")
+			_ = cmd.Flags().Set("event", "")
+			_ = cmd.Flags().Set("set-diagnosis", "")
+			_ = cmd.Flags().Set("request-id", "")
+			_ = cmd.Flags().Set("evidence", "")
+			for _, name := range []string{"json", "hook", "scope", "no-dirty", "host", "event", "set-diagnosis", "request-id", "evidence"} {
 				if f := cmd.Flags().Lookup(name); f != nil {
 					f.Changed = false
 				}
@@ -47,6 +55,63 @@ TASK.md 任务看板与 MEMORY.md 避坑卡片进行确定性动态锚定，生�
 
 		if scopeChanged && len(scopes) == 0 {
 			return &UsageError{Err: errors.New("--scope (-s) 参数不能为空白字符，请传入合法的仓库内相对路径或模块名")}
+		}
+
+		setDiag, _ := cmd.Flags().GetString("set-diagnosis")
+		reqID, _ := cmd.Flags().GetString("request-id")
+		evidence, _ := cmd.Flags().GetString("evidence")
+		setDiag = strings.TrimSpace(setDiag)
+		if setDiag != "" {
+			reqID = strings.TrimSpace(reqID)
+			if reqID == "" {
+				return &UsageError{Err: errors.New("--set-diagnosis 必须同时指定 --request-id")}
+			}
+			commonDir, dirErr := git.GetGitCommonDir(".")
+			if dirErr != nil {
+				return dirErr
+			}
+			recordDir := filepath.Join(commonDir, "agate", "requests")
+			updated, diagErr := prompt.UpdateDiagnosisState(recordDir, reqID, prompt.DiagnosisStatus(setDiag), evidence)
+			if diagErr != nil {
+				return diagErr
+			}
+			cmd.Printf("[i] 请求 %s 诊断状态已更新为 %s\n", updated.RequestID, updated.Diagnosis)
+			return nil
+		}
+
+		host, _ := cmd.Flags().GetString("host")
+		eventName, _ := cmd.Flags().GetString("event")
+		host = strings.TrimSpace(host)
+		eventName = strings.TrimSpace(eventName)
+		if host != "" || eventName != "" {
+			if host == "" || eventName == "" || !isHook {
+				return &UsageError{Err: errors.New("宿主原生模式必须同时指定 --hook、--host 和 --event")}
+			}
+			if isJSON {
+				return &UsageError{Err: errors.New("宿主原生模式不能与 --json 同时使用")}
+			}
+			raw, readErr := io.ReadAll(cmd.InOrStdin())
+			if readErr != nil {
+				return readErr
+			}
+			result, handleErr := prompt.HandleCursorEvent(prompt.CursorEventOptions{
+				Host:    host,
+				Event:   eventName,
+				Payload: raw,
+			})
+			if result.Stderr != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), result.Stderr)
+			}
+			if len(result.Stdout) > 0 {
+				cmd.Print(string(result.Stdout))
+			}
+			if handleErr != nil {
+				if errors.Is(handleErr, prompt.ErrUnsupportedHookTarget) {
+					return &UsageError{Err: handleErr}
+				}
+				return handleErr
+			}
+			return nil
 		}
 
 		var instruction string
@@ -121,4 +186,9 @@ func init() {
 	promptCmd.Flags().BoolVar(&flagPromptHook, "hook", false, "IDE Hook 模式，支持从标准输入读取提问并输出受管信封")
 	promptCmd.Flags().StringSliceVarP(&flagPromptScopes, "scope", "s", nil, "显式指定或纠偏物理锚定的目标文件/模块路径（可逗号分隔或重复传入）")
 	promptCmd.Flags().BoolVar(&flagPromptIgnoreDirty, "no-dirty", false, "禁用 Git 活跃脏文件兜底关联，防止无关在途改动污染锚定结果")
+	promptCmd.Flags().String("host", "", "宿主原生协议名称；当前已核对的值是 cursor")
+	promptCmd.Flags().String("event", "", "宿主原生事件；cursor 支持 beforeSubmitPrompt、preToolUse、postToolUse")
+	promptCmd.Flags().String("set-diagnosis", "", "校验并更新指定请求的诊断状态 (confirmed|hypothesis|not_applicable)")
+	promptCmd.Flags().String("request-id", "", "与 --set-diagnosis 配合使用的请求记录标识")
+	promptCmd.Flags().String("evidence", "", "与 --set-diagnosis confirmed 配合使用的诊断说明文本")
 }

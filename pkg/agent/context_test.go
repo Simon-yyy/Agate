@@ -464,3 +464,59 @@ func TestInspectContextCustomVSCodeProfileRecognizedAsKnown(t *testing.T) {
 		t.Fatalf("显式自定义 vscode profile 应当被识别为 vscode (known)，实际: %s (%s)", ctx.Editor, ctx.EditorStatus)
 	}
 }
+
+func TestInspectContextLocalExecutableIdentifiesEditorOnly(t *testing.T) {
+	mock := &mockProcessInspector{chain: []ProcessInfo{
+		{PID: 8, PPID: 4, Path: `C:\Program Files\cursor\Cursor.exe`, Name: "Cursor.exe"},
+		{PID: 4, PPID: 1, Path: `C:\Program Files\cursor\Cursor.exe`, Name: "Cursor.exe"},
+	}}
+	ctx := InspectContextFull(func(string) string { return "" }, "", "", nil, mock, time.Now())
+	if ctx.Editor != "cursor" || ctx.EditorStatus != StatusKnown {
+		t.Fatalf("同一本地编辑器的多条进程证据应识别为 cursor，实际: %s (%s)", ctx.Editor, ctx.EditorStatus)
+	}
+	if ctx.RunnerStatus != StatusUnknown || ctx.Runner != "" {
+		t.Fatalf("本地 Editor 证据不应成为 Runner，实际: %s (%s)", ctx.Runner, ctx.RunnerStatus)
+	}
+	eff, ok := ctx.EffectiveTarget()
+	if !ok || eff != "cursor" {
+		t.Fatalf("没有 Runner 时应采用 Editor，实际: %s (%t)", eff, ok)
+	}
+	if mock.lastDepth != defaultAncestorDepth() {
+		t.Fatalf("采集深度应使用平台默认值 %d，实际 %d", defaultAncestorDepth(), mock.lastDepth)
+	}
+}
+
+func TestInspectContextLocalEditorsConflict(t *testing.T) {
+	mock := &mockProcessInspector{chain: []ProcessInfo{
+		{PID: 3, PPID: 2, Path: `C:\Program Files\cursor\Cursor.exe`, Name: "Cursor.exe"},
+		{PID: 2, PPID: 1, Path: `C:\Program Files\Microsoft VS Code\Code.exe`, Name: "Code.exe"},
+	}}
+	ctx := InspectContextFull(func(string) string { return "" }, "", "", nil, mock, time.Now())
+	if ctx.EditorStatus != StatusAmbiguous {
+		t.Fatalf("不同本地宿主应保持 ambiguous，实际: %s (%s)", ctx.Editor, ctx.EditorStatus)
+	}
+	if _, ok := ctx.EffectiveTarget(); ok {
+		t.Fatal("无法仲裁的宿主不应产生装配目标")
+	}
+}
+
+func TestInspectContextCodexRunnerKeepsPriorityOverLocalEditor(t *testing.T) {
+	env := map[string]string{"CODEX_SESSION_ID": "session"}
+	mock := &mockProcessInspector{chain: []ProcessInfo{
+		{PID: 9, PPID: 1, Path: `D:\Apps\Cursor.exe`, Name: "Cursor.exe"},
+	}}
+	ctx := InspectContextFull(func(k string) string { return env[k] }, "", "", nil, mock, time.Now())
+	if ctx.Editor != "cursor" || ctx.Runner != "codex" {
+		t.Fatalf("预期 Editor=cursor Runner=codex，实际 editor=%s runner=%s", ctx.Editor, ctx.Runner)
+	}
+	eff, ok := ctx.EffectiveTarget()
+	if !ok || eff != "codex" {
+		t.Fatalf("Runner 应优先于本地 Editor，实际: %s (%t)", eff, ok)
+	}
+	if IsAutomationEnvironmentWithProfiles(func(k string) string { return env[k] }, nil) != (ctx.RunnerStatus == StatusKnown) {
+		t.Fatal("自动化判断应继续只看 Runner")
+	}
+	if isAutomationEnvironmentFull(func(string) string { return "" }, nil, mock) {
+		t.Fatal("仅有本地 Editor 进程证据时不应判定为自动化环境")
+	}
+}

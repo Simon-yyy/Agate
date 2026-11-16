@@ -15,7 +15,8 @@ Agate 遵循**单一事实源（Single Source of Truth, SSOT）**原则：所有
    - 代码必须完整可运行，严禁使用 `// ... 保持不变` 等偷懒省略占位符。
 2. **两阶段硬门禁与指令语义扩写 (Two-Phase Gate & Intent Expansion)**：
    - **双轨自适应分流**：模糊指令须先调用 `agate prompt` 锚定四源物理现场并补齐隐式工程项；清晰明确指令免调命令并遵循最小影响原则收敛展开（防过度扩写）；
-   - **分级放行与局部纠偏闭环**：首轮强制输出 `【指令语义解码与隐式需求展开】` 四要素块；纯只读查询（A 级）直通回答，核心修改（C 级）输出精简 Plan 后提示用户确认“执行”或指出解码偏差；收到局部修正意见时严禁抢跑改代码，必须重新解码对齐并再次等待“执行”。
+   - **分级放行与局部纠偏闭环**：首轮强制输出 `【指令语义解码与隐式需求展开】` 四要素块；纯只读查询（A 级）直通回答，核心修改（C 级）输出精简 Plan 后提示用户确认“执行”或指出解码偏差；收到局部修正意见时严禁抢跑改代码，必须重新解码对齐并再次等待“执行”；
+   - **请求类型与诊断连续性**：每个新任务或改变目标的请求重新确认目标和动作类型。普通状态询问不重复完整流程。纠偏重新核对目标与已有证据。用户确认关联已有方案，不把“执行”本身当作新故障，也不扩大授权范围。锚定置信度 `explicit` 只说明文件或模块明确，不说明根因已查明。纯分析请求只读检查后交付诊断结论，不强推实施 Plan；修复故障须先形成有证据的诊断结论再出方案；原因未明时交付排查计划，不把假设写成已证实根因；新功能或明确改动说明现状与预期差异，不虚构故障。故障类诊断须交付现象与预期、位置与证据、因果解释、不确定项、方案依据五要素；诊断状态分为未诊断、待验证假设、已形成有证据的诊断结论，不能仅凭解码标题、`explicit` 或一份 Plan 变更诊断状态。
 3. **3-Hop 寻路规范 (3-Hop Navigation)**：
    - 检索路径严格遵循：`MAP.md` (空间地图) -> `contexts/context.md` (技术契约) -> 目标源码，严禁无序全仓盲扫。
 4. **闭环验证与两振熔断 (Fail-Fast)**：
@@ -125,6 +126,14 @@ Agate 采用“**双地图为规范本体，主流预置与开放式档案分发
 2. **长尾软件零代码扩展契约**：对于 GitHub Copilot、Cline、Trae、Continue、Aider 等未预置目标，开发者可通过 `agate profile add <name>`（或配置 `[agent.profiles.<name>]`）声明 `markdown`、`frontmatter-md`（`.mdc`）或 `pointer` 三大范式规则入口及 `env_keys` / `term_programs` 环境指纹，获得与内置工具同等的自动识别、受管合并与 `.code-workspace` 独立视图支持；
 3. **安全底座零死角**：`.git/info/exclude` 隐形忽略、`pre-commit` 暂存区审计与 `pre-push` 物理防偷跑钩子在操作系统与 Git 进程级透明运行，任何非预置 Agent 或第三方编辑器均无权绕过。
 
+### 4.3 跨平台宿主感知与 Windows 原生采集标准
+
+为杜绝在 Windows、Linux 等不同操作系统下因宿主进程链不同而出现身份漏判与越权提权，系统确立如下采集契约：
+1. **Editor 与 Runner 角色严格解耦**：宿主编辑器（Editor）仅代表运行环境，执行 Agent（Runner）代表具有修改任务意图的智能体。本地 Editor 进程证据只作用于 Editor 判定，严禁无条件升级为 Runner 或自动化执行凭据；
+2. **Windows 原生快照规范**：Windows 平台采用 Win32 Unicode API（`CreateToolhelp32Snapshot`、`OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`、`QueryFullProcessImageNameW`、`GetProcessTimes`），默认采集深度为 8（硬上限 8）；
+3. **安全与防环防线**：查询父子进程创建时间，若父进程创建时间晚于子进程（疑似 PID 复用）或链路成环，立即有界停止；普通权限运行，遇“Access is denied”时优雅降级并保留已核验节点；
+4. **精确匹配与脱敏**：仅精确匹配已确认的本地可执行文件（`Cursor.exe` -> `cursor`，`Code.exe` / `Code - Insiders.exe` -> `vscode`），证据说明仅展示 PID、进程名与层级，绝不输出完整安装路径或私有命令行。
+
 ---
 
 ## 五、 架构地图骨架标准 (MAP.md & contexts/context.md)
@@ -192,6 +201,19 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
    - CLI 强制向终端标准错误/输出打印醒目红色熔断框；
    - Agent 必须将当次轮次标记为最终轮次（`IsFinal=true`），严禁继续盲目猜测与死循环修改代码；
    - 必须主动向用户提交错误堆栈并移交控制权。
+
+### 6.4 提示词编译、宿主原生 Hook 与诊断状态机标准
+针对 IDE/宿主（如 Cursor）的自动化 Hook 集成与诊断防跳步机制，规范如下协议：
+1. **参数与退出码**：
+   - 未知/不支持的 `--host` 或 `--event`，或者非法参数组合（如 `--host` 与 `--json` 混用、`--scope` 空白或非法）严格返回退出码 `2` (`[USAGE_ERR]`)；
+   - 宿主原生 Hook 模式下，协议内的业务拦截/拒绝向标准输出输出符合宿主协议的 JSON（如 `{"continue":false,...}` 或 `{"permission":"deny",...}`），诊断提示走 stderr，返回非零退出码（`1`），标准输出绝不倾倒信封正文；
+2. **上下文产物落盘与精确读取印证**：
+   - `beforeSubmitPrompt` 事件中编译信封并落盘至私有目录 `.git/agate/requests/<requestID>.context.md`，同时维护会话级活跃请求指针（`sessions/<hash>.active`）；
+   - `postToolUse` 事件精确校验工具读取路径是否与当前请求对应的 `<requestID>.context.md` 产物相匹配，仅匹配成功时才将交付状态流转为 `observed_read` 并记录 `DeliveryEvidence`；
+3. **写入前门禁与诊断连续性**：
+   - `preToolUse` 在所有代码写入（`Write`/`Edit`）、终端执行（`Shell`/`Bash`）或 MCP 写工具前执行双重校验：必须已完成上下文交付（`DeliveryEvidence` 非空），且诊断状态为 `confirmed` 或 `not_applicable`；未诊断（`undiagnosed`）或待验证假设（`hypothesis`）坚决阻断；
+4. **受校验的诊断状态更新**：
+   - 支持通过 `agate prompt --set-diagnosis <status> --request-id <id> --evidence "<文本>"` 进行状态更新；若指定 `confirmed`，必须通过五要素文本结构校验（现象与预期、位置与证据、因果解释、不确定项、方案依据），拦截有 Plan 无原因说明的违规跳步。
 
 ---
 

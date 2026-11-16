@@ -73,13 +73,13 @@
 - [cmd/profile.go](cmd/profile.go)：`agate profile` 命令行入口，列出与注册内置/自定义 AI 工具档案（支持项目级、本机私有与个人全局三层配置落盘）。
 - [cmd/workspace.go](cmd/workspace.go)：`agate workspace` 命令行入口，预览、生成、恢复或直接启动按工具隔离的 `.code-workspace` 独立视图窗口（支持逗号分隔 `-t` 目标列表与空白参数前置拦截）。
 - [cmd/detect.go](cmd/detect.go)：`agate detect` 命令行入口，只读诊断当前宿主编辑器（Editor）、执行 Agent（Runner）、白名单路径与网络传输环境指纹（支持 `--explain` 脱敏详细证据链及 `--json` 机器格式输出）。
-- [cmd/prompt.go](cmd/prompt.go)：`agate prompt` 命令行入口，自然语言意图物理锚定与结构化 Prompt 编译器（支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 排除无关脏文件、`--json` 结构化输出与 `--hook` 标准输入注入模式，含空指令、显式空白 `-s ""` 与孤立顶层容器目录 `pkg`/`internal` 前置拦截及 `Flag.Changed` 状态归零）。
+- [cmd/prompt.go](cmd/prompt.go)：`agate prompt` 命令行入口，自然语言意图物理锚定与结构化 Prompt 编译器（支持 `-s/--scope` 显式目标纠偏、`--no-dirty` 排除无关脏文件、`--json` 结构化输出、`--hook` 标准输入注入、`--host`/`--event` 宿主原生 Hook 适配及 `--set-diagnosis`/`--request-id`/`--evidence` 受校验诊断状态更新，含空指令、显式空白 `-s ""` 与孤立顶层容器目录 `pkg`/`internal` 前置拦截及 `Flag.Changed` 状态归零）。
 
 ### 2. 规约适配与分发 (`pkg/adapter/`)
 
 - [pkg/adapter/adapter.go](pkg/adapter/adapter.go)：多 Agent 目标嗅探器与规约分发器。
   - 支持内置目标：Codex (`AGENTS.md` 受管区块)、Cursor (`.cursorrules`)、Antigravity (`.gemini/GEMINI.md`)、Claude Code (`CLAUDE.md`)、Windsurf (`.windsurfrules`)，并开放支持任意声明式自定义工具档案。
-  - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源，并提供历史规约陈旧模式探测（`CheckDeprecatedRulePatterns`，含旧版 `AGENTS.md` 寻路与缺失 `Intent Expansion` 告警）。
+  - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源，并提供历史规约陈旧模式探测（`CheckDeprecatedRulePatterns`，含旧版 `AGENTS.md` 寻路、缺失 `Intent Expansion`、把只读排查直接推向 Plan 及缺失“诊断状态/诊断连续性”告警）与 `PreviewRuleDrift` 只读差异预览。
 - [pkg/adapter/plan.go](pkg/adapter/plan.go)：只读分发计划与执行、三大规则渲染范式（`markdown` 受管区块合并、`frontmatter-md` 保留或生成 YAML Frontmatter 的 `.mdc` 规则、`pointer` 轻量寻路引用引导并内嵌规则哈希摘要）、Git 跟踪保护（含大小写不敏感文件系统下基于 Git 索引与 `os.SameFile` 的物理文件校验）、路径与符号链接检查、过期快照检查、分发写入锁、双向重叠读取及正文版本诊断。诊断不等于客户端加载证明。
 
 ### 3. Git 治理与安全门禁 (`pkg/git/`)
@@ -130,7 +130,10 @@
 
 - [pkg/agent/context.go](pkg/agent/context.go)：统一身份感知模型，解耦宿主编辑器（Editor）与执行者（Runner），定义 `known`/`unknown`/`ambiguous` 状态模型、`EffectiveTarget()` 首选装配目标判定与 `HasConflict()` 冲突检测容器。
 - [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf 及开放自定义工具）、支持自定义档案的全候选汇总与冲突仲裁引擎（`InspectContext`/`InspectContextFull`/`DetectEnvironmentFull`：进程级强指纹 `env_keys` 优先于宿主弱指纹 `term_programs`/`gitIPC` 与路径白名单，活跃祖先进程压制跨宿主残留会话变量，冲突时严禁顺序短路盲选）。
-- [pkg/agent/collector.go](pkg/agent/collector.go)：受限祖先进程链探测器（`ProcessInspector` 接口，Linux `/proc` 安全解析、内置 `visited` 防环与多实例去重）与远程白名单路径特征匹配器（支持 `.cursor-server` 与 `.vscode-server` 对照，区分活跃会话专有变量与全局 `PATH`，非特权安全降级且严禁读取完整命令行）。
+- [pkg/agent/collector.go](pkg/agent/collector.go)：祖先进程证据转换、本地可执行文件精确匹配（已确认 `Cursor.exe`、`Code.exe`、`Code - Insiders.exe`）与远程白名单路径特征匹配器（`.cursor-server` 与 `.vscode-server`）。Windows 默认采集 8 层，Linux 保持 4 层，硬上限 8 层。说明只保留进程名、PID、层级和匹配原因，不记录完整安装路径或命令行。
+- [pkg/agent/collector_windows.go](pkg/agent/collector_windows.go)：Windows 进程快照、受限路径与创建时间查询。访问被拒绝、链路断裂、PID 复用或成环时保留已核验节点并降级。
+- [pkg/agent/collector_linux.go](pkg/agent/collector_linux.go)：Linux `/proc` 采集，保持原有行为。
+- [pkg/agent/collector_other.go](pkg/agent/collector_other.go)：其余平台安全降级，不请求提权。
 - [pkg/agent/session.go](pkg/agent/session.go)：跨会话声明上下文协议解析器（`AGATE_SESSION_CONTEXT`，包含长度 ≤512B、版本锁定、凭据防火墙、过期拦截、受控来源白名单 `terminal`/`ssh`/`extension`/`ide`/`ci` 及 `SessionID` 脱敏与终端会话一致性校验）。
 - [pkg/agent/profile.go](pkg/agent/profile.go)：内置入口档案、开放式声明档案（支持 `markdown`、`frontmatter-md`、`pointer` 三种渲染格式，`.md`/`.mdc`/`.rules` 路径后缀及 `env_keys`/`term_programs`/`frontmatter` 属性）、名称和跨平台相对路径校验（含 `verify.cmd`/`verify.sh`/`verify.bat`/`.ignore` 等保留资产保护）；自定义档案不能静默覆写内置工具或声明同路径目标。
 
@@ -144,7 +147,9 @@
 
 ### 12. 提示词物理锚定与编译器 (`pkg/prompt/`)
 
-- [pkg/prompt/compiler.go](pkg/prompt/compiler.go)：零模糊词硬编码的确定性物理锚定引擎（提取真实路径与声明模块、区分 `explicit`/`inferred_dirty`/`unresolved` 锚定置信度、支持清晰指令收敛模式与脏文件精简、支持 `--scope` 显式覆写与 `--no-dirty` 脏文件隔离、切片 `MAP.md` 关联模块、提取 `TASK.md` 断点与 `MEMORY.md` 按需准入），合成强制包含 `agate-intent` 解码块、双轨自适应分流、双通道确认与局部纠偏重锚定闭环（Correction Loop）的高密度结构化执行信封。
+- [pkg/prompt/compiler.go](pkg/prompt/compiler.go)：零模糊词硬编码的确定性物理锚定引擎（提取真实路径与声明模块、区分 `explicit`/`inferred_dirty`/`unresolved` 锚定置信度、支持清晰指令收敛模式与脏文件精简、支持 `--scope` 显式覆写与 `--no-dirty` 脏文件隔离、切片 `MAP.md` 关联模块、提取 `TASK.md` 断点与 `MEMORY.md` 按需准入），合成强制包含 `agate-intent` 解码块、双轨自适应分流、双通道确认、诊断五要素交付要求与局部纠偏重锚定闭环（Correction Loop）的高密度结构化执行信封。
+- [pkg/prompt/cursor_hook.go](pkg/prompt/cursor_hook.go)：已核对的 Cursor 原生事件适配器（`beforeSubmitPrompt` 将编译信封落盘至 `.git/agate/requests/<requestID>.context.md` 并记录会话活跃指针且重入幂等；`postToolUse` 精确匹配当前请求上下文产物读取后记录交付证据；`preToolUse` 在写入/Shell/MCP 工具执行前校验上下文交付与诊断放行条件）。
+- [pkg/prompt/workflow.go](pkg/prompt/workflow.go)：请求状态机、会话活跃指针持久化与诊断连续性校验引擎（`RequestState` 原子落盘、`ValidateDiagnosisOutput` 拦截“有 Plan 无原因说明”与“待验证假设伪装已确认结论”、`UpdateDiagnosisState` 受校验状态流转及 `ReuseAllowed` 跨指令/跨工作区复用拦截）。
 
 ### 13. 可选语义决策适配层（规划）
 

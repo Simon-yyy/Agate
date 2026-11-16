@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"agate/internal/templates"
 	"agate/pkg/adapter"
 	agentinfo "agate/pkg/agent"
 	"agate/pkg/config"
@@ -17,6 +19,11 @@ import (
 
 // newInitCommand 让测试通过与用户相同的命令入口，并隔离各实例的参数状态。
 func newInitCommand() *cobra.Command {
+	return newInitCommandWithInspector(nil)
+}
+
+// newInitCommandWithInspector 注入祖先进程采集器。生产入口传入 nil，使用平台默认采集。
+func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Command {
 	var targets []string
 	var noHook, dryRun, allowTracked bool
 	command := &cobra.Command{
@@ -64,7 +71,7 @@ func newInitCommand() *cobra.Command {
 			}
 			validConfigTargets := filterValidTargets(cfg.Agent.Targets)
 
-			detectionCtx := agentinfo.InspectContext(os.Getenv, os.Getenv("TERM_PROGRAM"), os.Getenv("VSCODE_GIT_IPC_HANDLE"), cfg.Agent.Profiles)
+			detectionCtx := agentinfo.InspectContextFull(os.Getenv, os.Getenv("TERM_PROGRAM"), os.Getenv("VSCODE_GIT_IPC_HANDLE"), cfg.Agent.Profiles, inspector, time.Now())
 			if len(validTargets) == 0 && len(validConfigTargets) == 0 {
 				if detectionCtx.RunnerStatus == agentinfo.StatusAmbiguous {
 					return fmt.Errorf("环境检测到相互冲突的 Agent 身份指纹: %v；未解决身份冲突前拒绝回退已有规则入口，请使用 -t <工具> 显式指定装配目标", detectionCtx.Warnings)
@@ -73,7 +80,12 @@ func newInitCommand() *cobra.Command {
 					return fmt.Errorf("环境检测到相互冲突的 Editor 宿主环境: %v；未解决身份冲突前拒绝回退已有规则入口，请使用 -t <工具> 显式指定装配目标", detectionCtx.Warnings)
 				}
 			}
-			detectedAgent, detected := agentinfo.DetectEnvironmentWithProfiles(os.Getenv, os.Getenv("TERM_PROGRAM"), os.Getenv("VSCODE_GIT_IPC_HANDLE"), cfg.Agent.Profiles)
+			var detectedAgent agentinfo.Kind
+			detected := false
+			if target, ok := detectionCtx.EffectiveTarget(); ok {
+				detectedAgent = agentinfo.Kind(target)
+				detected = true
+			}
 			inputs := validTargets
 			selection := "显式目标"
 			if len(inputs) == 0 && len(validConfigTargets) > 0 {
@@ -98,6 +110,9 @@ func newInitCommand() *cobra.Command {
 				cmd.Printf("[i] 使用用户全局规约 -> %s（替代内置正文）\n", source)
 				for _, warning := range adapter.CheckDeprecatedRulePatterns(rules) {
 					cmd.Printf("[!] 全局规约需复核: %s\n", warning)
+				}
+				for _, note := range adapter.PreviewRuleDrift(rules, templates.SkillMD) {
+					cmd.Printf("[!] 规约差异预览（未覆写）: %s\n", note)
 				}
 			}
 			plan, err := adapter.BuildPlan(pwd, rules, resolved, cfg.Agent.Profiles, allowTracked)

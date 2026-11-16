@@ -7,8 +7,17 @@ import (
 	"strings"
 	"testing"
 
+	agentinfo "agate/pkg/agent"
 	"agate/pkg/git"
 )
+
+type relayMockInspector struct {
+	chain []agentinfo.ProcessInfo
+}
+
+func (m *relayMockInspector) GetAncestors(pid int, maxDepth int) ([]agentinfo.ProcessInfo, error) {
+	return m.chain, nil
+}
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -153,6 +162,15 @@ func TestDetectCurrentAgentPrecision(t *testing.T) {
 	t.Setenv("CODEX_SESSION_ID", "session-1")
 	if a := DetectCurrentAgent(tempDir); a != "codex" {
 		t.Errorf("CODEX_SESSION_ID 存在时预期推断为 codex，实际为: %s", a)
+	}
+
+	// 4. 仅有本地 Editor 祖先进程 (Cursor.exe) 且无 Runner 指纹时，严禁升级为任务执行者
+	t.Setenv("CODEX_SESSION_ID", "")
+	editorOnly := &relayMockInspector{chain: []agentinfo.ProcessInfo{
+		{PID: 10, PPID: 1, Path: `C:\Apps\Cursor.exe`, Name: "Cursor.exe"},
+	}}
+	if a := detectCurrentAgentWithInspector(tempDir, editorOnly); a != "" {
+		t.Errorf("仅有本地 Editor 进程证据时严禁成为 Runner，实际为: %s", a)
 	}
 }
 

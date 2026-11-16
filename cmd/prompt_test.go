@@ -149,10 +149,58 @@ func resetPromptFlagsForTest() {
 		_ = promptCmd.Flags().Set("json", "false")
 		_ = promptCmd.Flags().Set("hook", "false")
 		_ = promptCmd.Flags().Set("no-dirty", "false")
-		for _, name := range []string{"json", "hook", "scope", "no-dirty"} {
+		_ = promptCmd.Flags().Set("host", "")
+		_ = promptCmd.Flags().Set("event", "")
+		for _, name := range []string{"json", "hook", "scope", "no-dirty", "host", "event"} {
 			if f := promptCmd.Flags().Lookup(name); f != nil {
 				f.Changed = false
 			}
 		}
+	}
+}
+
+func TestPromptCmd_HostModeRejectsJSONAndUnknownEvent(t *testing.T) {
+	resetPromptFlagsForTest()
+	var outBuf bytes.Buffer
+	var errBuf bytes.Buffer
+	rootCmd.SetIn(bytes.NewBufferString(`{"prompt":"看一下采集"}`))
+	rootCmd.SetOut(&outBuf)
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"prompt", "--hook", "--host", "cursor", "--event", "beforeSubmitPrompt", "--json"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("宿主原生模式与 --json 同时使用应返回用法错误")
+	}
+
+	resetPromptFlagsForTest()
+	outBuf.Reset()
+	errBuf.Reset()
+	rootCmd.SetIn(bytes.NewBufferString(`{"prompt":"看一下采集"}`))
+	rootCmd.SetOut(&outBuf)
+	rootCmd.SetErr(&errBuf)
+	rootCmd.SetArgs([]string{"prompt", "--hook", "--host", "cursor", "--event", "sessionStart"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("未支持的事件应返回用法错误")
+	}
+	if strings.Contains(outBuf.String(), "agate-intent") {
+		t.Fatal("失败的原生事件不应把执行信封写到标准输出")
+	}
+
+	// 未知事件应返回退出码 2 (UsageError)
+	resetPromptFlagsForTest()
+	outBuf.Reset()
+	errBuf.Reset()
+	rootCmd.SetIn(bytes.NewBufferString(`{"prompt":"看一下采集"}`))
+	exitCode := ExecuteWithArgs([]string{"prompt", "--hook", "--host", "cursor", "--event", "sessionStart"}, &outBuf, &errBuf)
+	if exitCode != 2 {
+		t.Fatalf("未支持事件应返回退出码 2，实际 %d", exitCode)
+	}
+
+	// --set-diagnosis 缺少 --request-id 应返回退出码 2
+	resetPromptFlagsForTest()
+	outBuf.Reset()
+	errBuf.Reset()
+	exitCode = ExecuteWithArgs([]string{"prompt", "--set-diagnosis", "confirmed"}, &outBuf, &errBuf)
+	if exitCode != 2 {
+		t.Fatalf("--set-diagnosis 缺少 --request-id 应返回退出码 2，实际 %d", exitCode)
 	}
 }

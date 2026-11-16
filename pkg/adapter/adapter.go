@@ -228,5 +228,31 @@ func CheckDeprecatedRulePatterns(content []byte) []string {
 	if strings.Contains(text, "## 2. 两阶段硬门禁 (Two-Phase Gate)") && !strings.Contains(text, "Intent Expansion") {
 		warnings = append(warnings, "第 2 条仍为旧版 '## 2. 两阶段硬门禁 (Two-Phase Gate)'，缺少 '指令语义扩写 (Intent Expansion)' 与 'agate prompt' 规范")
 	}
+	if strings.Contains(text, "遇到任何排查、探查、修复或业务修改任务，首轮仅输出指令解码分析、精简方案") {
+		warnings = append(warnings, "包含旧版流程要求（将只读排查直接推向 Plan 输出，缺少先诊断再出方案约束）")
+	}
+	if strings.Contains(text, "Intent Expansion") && !strings.Contains(text, "诊断状态") {
+		warnings = append(warnings, "缺少 '请求类型与诊断连续性' 规范（未区分纯分析、原因未明与已证实根因修复）")
+	}
 	return warnings
+}
+
+// PreviewRuleDrift 对照全局规约和内置模板，只生成差异说明，不写回用户文件。
+func PreviewRuleDrift(global, bundled []byte) []string {
+	var notes []string
+	current := string(global)
+	template := string(bundled)
+	if strings.Contains(current, "ai-dev-harness") {
+		notes = append(notes, "全局规约仍使用旧品牌 ai-dev-harness；预览不会覆写该文件")
+	}
+	if strings.Contains(current, "## 2. 两阶段硬门禁 (Two-Phase Gate)") && !strings.Contains(current, "Intent Expansion") {
+		notes = append(notes, "全局规约仍是缺少 Intent Expansion 的旧版两阶段硬门禁；预览不会覆写该文件")
+	}
+	if strings.Contains(current, "遇到任何排查、探查、修复或业务修改任务，首轮仅输出指令解码分析、精简方案") {
+		notes = append(notes, "全局规约仍包含把只读排查直接推向 Plan 的旧要求；预览不会覆写该文件")
+	}
+	if strings.Contains(template, "诊断状态") && !strings.Contains(current, "诊断状态") {
+		notes = append(notes, "全局规约缺少诊断状态要求，内置模板已包含；预览不会覆写该文件")
+	}
+	return notes
 }

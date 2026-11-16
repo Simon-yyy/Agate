@@ -8,7 +8,7 @@ func TestParseAndDetectCodex(t *testing.T) {
 	}
 	env := map[string]string{"CODEX_SESSION_ID": "thread-1"}
 	getenv := func(key string) string { return env[key] }
-	got, ok := DetectEnvironment(getenv, "", "")
+	got, ok := DetectEnvironmentFull(getenv, "", "", nil, testMockEmpty)
 	if !ok || got != Codex {
 		t.Fatalf("DetectEnvironment(Codex) = %q, %v", got, ok)
 	}
@@ -27,7 +27,7 @@ func TestAllHasStableOrder(t *testing.T) {
 func TestDetectEnvironmentPrefersEnvKeyOverTermProgram(t *testing.T) {
 	env := map[string]string{"CLAUDE_CODE": "1"}
 	getenv := func(key string) string { return env[key] }
-	got, ok := DetectEnvironment(getenv, "cursor", "cursor")
+	got, ok := DetectEnvironmentFull(getenv, "cursor", "cursor", nil, testMockEmpty)
 	if !ok || got != Claude {
 		t.Fatalf("DetectEnvironment(CLAUDE_CODE=1, TERM_PROGRAM=cursor) = %q, %v; expected %q, true", got, ok, Claude)
 	}
@@ -57,7 +57,7 @@ func TestDetectEnvironmentWithCustomProfiles(t *testing.T) {
 
 	env := map[string]string{"TRAE_AGENT": "1"}
 	getenv := func(key string) string { return env[key] }
-	got, ok := DetectEnvironmentWithProfiles(getenv, "vscode", "", custom)
+	got, ok := DetectEnvironmentFull(getenv, "vscode", "", custom, testMockEmpty)
 	if !ok || got != Kind("trae") {
 		t.Fatalf("DetectEnvironmentWithProfiles(TRAE_AGENT=1) = %q, %v; expected trae, true", got, ok)
 	}
@@ -66,7 +66,7 @@ func TestDetectEnvironmentWithCustomProfiles(t *testing.T) {
 	}
 
 	emptyGetenv := func(string) string { return "" }
-	got, ok = DetectEnvironmentWithProfiles(emptyGetenv, "Cline-Terminal-Host", "", custom)
+	got, ok = DetectEnvironmentFull(emptyGetenv, "Cline-Terminal-Host", "", custom, testMockEmpty)
 	if !ok || got != Kind("cline") {
 		t.Fatalf("DetectEnvironmentWithProfiles(TERM_PROGRAM=Cline-Terminal-Host) = %q, %v; expected cline, true", got, ok)
 	}
