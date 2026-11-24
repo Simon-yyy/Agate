@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	version = "0.6.5"
+	version = "0.6.6"
 )
 
 // UsageError 标识命令行参数解析或用法错误（SPEC 要求退出码 2）
