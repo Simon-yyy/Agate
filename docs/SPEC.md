@@ -74,7 +74,7 @@ logs/
 
 ### 3.1 拦截阶段与职责
 - **`pre-commit` 门禁**：在提交暂存区代码前强制调用 `agate verify --staged`。直接从 Git Index（暂存区）提取待提交文件并通过 `git show :<path>` 针对性审查，毫秒级快速就绪，精准拦截私有密钥、超大文件、机器硬编码绝对路径、未完工占位符及 `vendor/` 污染等违规内容，工作区脏文件不产生误拦；
-- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端、检测到 Agent/CI 环境变量指纹（含 `CLAUDE_CODE`、`ANTIGRAVITY_IDE`、`CURSOR_VERSION`、`CODEX_VERSION`、`CODEX_SHELL` 等）或检测到 `AGATE_SESSION_CONTEXT` 包含执行者身份（大小写无关匹配 `runner=`/`agent=`）时，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 才准予进入全量验证并放行。这道门独立于原生 Hook：会话有效时，原生 Hook 在诊断检查之前放行 Shell，不解析命令文本。
+- **`pre-push` 物理阻断**：严格阻止 AI 在未经用户指令时执行 `git push` 偷跑代码至远端。在非交互式终端、检测到 Agent/CI 环境变量指纹（含 `CLAUDE_CODE`、`ANTIGRAVITY_IDE`、`CURSOR_VERSION`、`CODEX_VERSION`、`CODEX_SHELL` 等）或检测到 `AGATE_SESSION_CONTEXT` 包含执行者身份（大小写无关匹配 `runner=`/`agent=`）时，唯有显式声明 `ALLOW_AUTOMATED_PUSH=1` 或 `true` 才准予进入全量验证并放行。这道门独立于原生 Hook：会话有效时，原生 Hook 只门禁结构化文件编辑，其余工具直接放行，不解析命令文本。没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。
 
 ### 3.2 Hook 安装与规约分发防篡改策略
 1. **非破坏性备份**：若检测到开发者已有同名 Hook，必须自动重命名备份（如 `pre-commit.agate.bak`），严禁静默覆盖；
@@ -212,7 +212,7 @@ Agent 向用户交付时，聊天框必须包含类似下述格式的实机物�
    - `postToolUse` 事件精确校验工具读取路径是否与当前请求对应的 `<requestID>.context.md` 产物相匹配，仅匹配成功时才将交付状态流转为 `observed_read` 并记录 `DeliveryEvidence`；
 3. **写入前门禁与诊断连续性**：
    - 文件编辑（`Write`/`Edit`）在 `preToolUse` 前必须已完成上下文交付，且诊断状态为 `confirmed` 或 `not_applicable`，并经过用户单独的「执行」和已确认文件范围核验。未诊断（`undiagnosed`）或待验证假设（`hypothesis`）阻断文件编辑；
-   - Shell 在会话有效后、进入诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。该放行不替代上文的 Git `pre-push`。行为见 [多宿主统一 Native Hook 契约](../contexts/context.md#多宿主统一-native-hook-契约)；
+   - 原生 Hook 只门禁结构化文件编辑（上下文已读、诊断、单独「执行」、轮次和目标路径）。其余工具在会话有效后直接放行，不看命令文本、不看诊断。没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。统一流程与旧的 Cursor `preToolUse` 都执行这条规则。该放行不替代上文的 Git `pre-push`。行为见 [多宿主统一 Native Hook 契约](../contexts/context.md#多宿主统一-native-hook-契约)；
 4. **受校验的诊断状态更新**：
    - 支持通过 `agate prompt --set-diagnosis <status> --request-id <id> --evidence "<文本>"` 进行状态更新；若指定 `confirmed`，必须通过五要素文本结构校验（现象与预期、位置与证据、因果解释、不确定项、方案依据），拦截有 Plan 无原因说明的违规跳步。
 5. **Antigravity IDE 2.8.0**：

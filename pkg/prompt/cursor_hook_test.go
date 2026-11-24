@@ -62,18 +62,26 @@ func TestCursorHookBlocksWriteUntilDiagnosisAndDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 校验 Write 与 MCP 在未交付时被拦截。Shell 不进入这道门。
-	for _, toolName := range []string{"Write", "mcp_filesystem_write"} {
-		write := []byte(`{"conversation_id":"conv","generation_id":"gen","tool_name":"` + toolName + `"}`)
-		blocked, err := HandleCursorEvent(CursorEventOptions{
-			Host: "cursor", Event: "preToolUse", Payload: write, RecordDir: dir, WorkDir: dir,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(blocked.Stdout), `"permission":"deny"`) {
-			t.Fatalf("未交付且未诊断时 %s 应被拦住: %s", toolName, blocked.Stdout)
-		}
+	// 文件编辑在未交付时被拦截。MCP 不因工具名进入这道门。
+	write := []byte(`{"conversation_id":"conv","generation_id":"gen","tool_name":"Write"}`)
+	blocked, err := HandleCursorEvent(CursorEventOptions{
+		Host: "cursor", Event: "preToolUse", Payload: write, RecordDir: dir, WorkDir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(blocked.Stdout), `"permission":"deny"`) {
+		t.Fatalf("未交付且未诊断时 Write 应被拦住: %s", blocked.Stdout)
+	}
+	mcp := []byte(`{"conversation_id":"conv","generation_id":"gen","tool_name":"mcp_filesystem_write"}`)
+	mcpRes, err := HandleCursorEvent(CursorEventOptions{
+		Host: "cursor", Event: "preToolUse", Payload: mcp, RecordDir: dir, WorkDir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mcpRes.Stdout), `"permission":"allow"`) {
+		t.Fatalf("MCP 不应因工具名被文件门拦住: %s", mcpRes.Stdout)
 	}
 
 	// 读取无关文件不能误标记交付
@@ -112,7 +120,7 @@ func TestCursorHookBlocksWriteUntilDiagnosisAndDelivery(t *testing.T) {
 		t.Fatalf("重复事件不应抹除已交付证据: err=%v state=%+v", err, repeatRes.State)
 	}
 
-	write := []byte(`{"conversation_id":"conv","tool_name":"Write"}`)
+	write = []byte(`{"conversation_id":"conv","tool_name":"Write"}`)
 	stillBlocked, err := HandleCursorEvent(CursorEventOptions{
 		Host: "cursor", Event: "preToolUse", Payload: write, RecordDir: dir, WorkDir: dir,
 	})
@@ -235,6 +243,28 @@ func TestCursorHookRejectsUnknownHostAndInvalidPayload(t *testing.T) {
 	result, err := HandleCursorEvent(CursorEventOptions{Host: "cursor", Event: "beforeSubmitPrompt", Payload: []byte(`not-json`), RecordDir: t.TempDir()})
 	if err == nil || !strings.Contains(string(result.Stdout), `"continue":false`) {
 		t.Fatalf("无效载荷应明确失败，err=%v stdout=%s", err, result.Stdout)
+	}
+}
+
+func TestCursorPreToolUseRejectsMissingConversation(t *testing.T) {
+	dir := t.TempDir()
+	for _, toolName := range []string{"Write", "Shell", "Read", "mcp_filesystem_write"} {
+		payload, err := json.Marshal(map[string]any{
+			"tool_name":  toolName,
+			"tool_input": map[string]any{"command": "git status"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := HandleCursorEvent(CursorEventOptions{
+			Host: "cursor", Event: "preToolUse", Payload: payload, RecordDir: dir, WorkDir: dir,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(res.Stdout), `"permission":"deny"`) || !strings.Contains(string(res.Stdout), "拒绝工具调用") {
+			t.Fatalf("没有会话标识时 %s 应拒绝，实际: %s", toolName, res.Stdout)
+		}
 	}
 }
 

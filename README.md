@@ -160,7 +160,8 @@ agate profile add continue --path .continue/rules/agate.md --format markdown
   agate prompt "重构 cmd/root.go" --json                     # 输出结构化 JSON 锚定结果与置信度等级
 
   # Cursor 原生 Hooks。文件编辑仍走上下文已读、诊断、单独「执行」、轮次和文件范围。
-  # Shell 在会话有效后、诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用文件授权。
+  # 只门禁结构化文件编辑。其余工具在会话有效后直接放行，不看命令文本、不看诊断。
+  # 没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。统一流程与旧的 preToolUse 都是这条规则。
   agate prompt --hook --host cursor --event beforeSubmitPrompt < event.json
   agate prompt --hook --host cursor --event preToolUse < event.json
   agate prompt --hook --host cursor --event postToolUse < event.json

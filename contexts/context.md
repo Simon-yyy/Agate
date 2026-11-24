@@ -88,7 +88,7 @@
 | `beforeSubmitPrompt` | 编译当前用户消息，在 Git 公共目录的 `agate/requests/` 下写入本轮上下文和请求记录，初始交付状态为 `pending_read`。收到单独的「执行」时，关联同会话、同工作区的当前待确认方案。 |
 | `postToolUse` | 通过 `additional_context` 提供本轮上下文的绝对路径。原生读取命中本轮文件时，登记 `observed_read` 和 `delivery_evidence`。方案轮和确认轮分别读取自己的文件。 |
 | `afterAgentResponse` | 从已交付请求的最终回复提取 `agate-plan`，记录诊断状态、方案标识及精确的仓库相对文件路径，等待用户确认。 |
-| `preToolUse` | 检查上下文交付、诊断、当前授权及目标文件。允许范围内的原生文件修改。Shell 在会话有效后、进入诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。 |
+| `preToolUse` | 只门禁结构化文件编辑：上下文已读、诊断、单独「执行」、轮次和目标路径。其余工具在会话有效后直接放行，不看命令文本、不看诊断。没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。统一流程与旧的 `HandleCursorEvent` 都执行这条规则。 |
 
 请求记录可核对上下文交付和审批。实际写入结果以客户端事件和文件状态为准。
 
@@ -114,7 +114,7 @@ IDE 2.8.0 的 `PostInvocation` 不带 `response`。适配器改读 `transcriptPa
   - 内部统一抽象为 `NativeEvent`（`Kind`: `submit`, `read_completed`, `response_completed`, `before_tool`, `observe`）与判定决策 `NativeDecision`（`Block`, `Reason`, `AdditionalContext`）；
   - 各宿主实现 `NativeAdapter` 接口（`Decode`/`Encode`），实现客户端私有协议与统一模型间的双向编解码；
   - 会话快照与锁统一隔离于 Git 公共目录的 `agate/requests/v2/<host>/<workspace-hash>/`，以“宿主 + 工作区 + 会话”为锁粒度；
-  - 写入判定统一由 `ApplyNativeWorkflow` 驱动：上下文已读交付门禁 -> 诊断状态门禁 -> 真人显式“执行”方案锁定 -> 精确目标文件范围核验。文件编辑走这道门并核对路径。Shell 在会话有效后、进入诊断检查之前放行，不检查命令文本。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。
+  - 写入判定统一由 `ApplyNativeWorkflow` 驱动，且只作用于结构化文件编辑：上下文已读交付门禁 -> 诊断状态门禁 -> 真人显式“执行”方案锁定 -> 精确目标文件范围核验。其余工具在会话有效后直接放行，不看命令文本、不看诊断。没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。是否该查、该改、该提交由宿主 Agent 按规约判断。
 - **预写入拒绝契约 (PreToolUse / Pre-Write)**：
   - Cursor：stdout 输出 `{"permission":"deny","user_message":"..."}`；
   - Antigravity IDE：stdout 输出 `{"decision":"deny","reason":"..."}`（挂载 `.agents/hooks.json`）；
@@ -134,7 +134,7 @@ IDE 2.8.0 的 `PostInvocation` 不带 `response`。适配器改读 `transcriptPa
   - 严禁以“顺带闭环”为由代跑任何外溢动作；
   - 必须且仅当用户指令中出现明确指向该外溢动作的专属动词（如“提交代码”、“上传Release”、“发布”）时，对应操作方可单次解锁代跑。
 - **与两道物理门的关系**：
-  - 上面的动词约束交给 Agent 遵守。原生 Hook 不解析 Shell 命令，也不用命令名单执行这条约束。会话有效时，Shell 在诊断检查之前放行。
+  - 上面的动词约束交给 Agent 遵守。原生 Hook 不解析命令，也不用工具名名单判断调查或外溢。会话有效时，只有结构化文件编辑进入诊断与「执行」门。
   - Git `pre-push` 仍单独拦截自动化推送。Agent 或非交互环境需要 `ALLOW_AUTOMATED_PUSH=1` 才进入后续校验。
 
 ## 4. 跨 Agent / 多角色任务接力与记忆资产防线 (Relay, Multi-Role & Memory Governance)

@@ -152,9 +152,9 @@
 ### 12. 提示词物理锚定与编译器 (`pkg/prompt/`)
 
 - [pkg/prompt/compiler.go](pkg/prompt/compiler.go)：零模糊词硬编码的确定性物理锚定引擎（提取真实路径与声明模块、区分 `explicit`/`inferred_dirty`/`unresolved` 锚定置信度、支持清晰指令收敛模式与脏文件精简、支持 `--scope` 显式覆写与 `--no-dirty` 脏文件隔离、切片 `MAP.md` 关联模块、提取 `TASK.md` 断点与 `MEMORY.md` 按需准入），合成强制包含 `agate-intent` 解码块、双轨自适应分流、双通道确认、诊断五要素交付要求与局部纠偏重锚定闭环（Correction Loop）的高密度结构化执行信封。
-- [pkg/prompt/cursor_hook.go](pkg/prompt/cursor_hook.go)：处理 Cursor 的提交、工具调用和回复事件，串联上下文交付、方案登记与原生文件写入授权。事件顺序和判定条件见 [Cursor 原生 Hook 契约](contexts/context.md#cursor-原生-hook)。
+- [pkg/prompt/cursor_hook.go](pkg/prompt/cursor_hook.go)：处理 Cursor 的提交、工具调用和回复事件，串联上下文交付、方案登记与原生文件写入授权。统一流程与旧的 `HandleCursorEvent` `preToolUse` 都要求会话标识；没有 `conversation_id` 时 Read、Shell、MCP 和文件编辑一律拒绝，理由为「缺少会话标识，拒绝工具调用」。事件顺序和判定条件见 [Cursor 原生 Hook 契约](contexts/context.md#cursor-原生-hook)。
 - [pkg/prompt/native_hook.go](pkg/prompt/native_hook.go)：定义统一原生事件模型（`NativeEvent`）、统一判定决策（`NativeDecision`）、分宿主编解码协议适配器接口（`NativeAdapter`）与分发注册表。
-- [pkg/prompt/native_workflow.go](pkg/prompt/native_workflow.go)：跨宿主生命周期状态流转与写入前拦截判定引擎（`ApplyNativeWorkflow`）。文件编辑走上下文交付、诊断状态、用户显式“执行”和文件范围校验。Shell 在会话有效后、进入诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。规则见 [多宿主统一 Native Hook 契约](contexts/context.md#多宿主统一-native-hook-契约)。
+- [pkg/prompt/native_workflow.go](pkg/prompt/native_workflow.go)：跨宿主生命周期状态流转与写入前拦截判定引擎（`ApplyNativeWorkflow`）。原生 Hook 只门禁结构化文件编辑：上下文已读、诊断状态、用户显式「执行」、轮次和目标路径。其余工具在会话有效后直接放行，不看命令文本、不看诊断。没有会话标识时，Read、Shell、MCP 和文件编辑都拒绝，理由为「缺少会话标识，拒绝工具调用」。规则见 [多宿主统一 Native Hook 契约](contexts/context.md#多宿主统一-native-hook-契约)。
 - [pkg/prompt/native_store.go](pkg/prompt/native_store.go)：基于 Git worktree 隔离的会话快照持久化与并发互斥锁（存储于 `.git/agate/requests/v2/<host>/<workspace-hash>/`）。
 - [pkg/prompt/antigravity_hook.go](pkg/prompt/antigravity_hook.go)：Antigravity IDE 原生 Hook 适配器，适配 `.agents/hooks.json`（`PreInvocation`, `PostToolUse`, `PostInvocation`, `PreToolUse`, `Stop`）与 `{"decision":"deny","reason":"..."}` 输出契约。`PostInvocation` 无 `response` 时回读 `transcriptPath` 中不超出 `initialNumSteps` 的最后一条 `PLANNER_RESPONSE`；确认轮缺少 TurnID 时绑定当前 `ActiveTurnID`。事件与实机边界见 [Antigravity IDE 原生 Hook](contexts/context.md#antigravity-ide-原生-hook)。
 - [pkg/prompt/claude_hook.go](pkg/prompt/claude_hook.go)：Claude Code 原生 Hook 适配器，适配 `.claude/settings.json` 与 `hookSpecificOutput` 阻断契约。

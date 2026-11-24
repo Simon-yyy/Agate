@@ -223,15 +223,15 @@ func TestNativeApprovalIsBoundToCurrentTurn(t *testing.T) {
 	if dec.Block {
 		t.Fatalf("确认后的 Shell 应放行，实际: %s", dec.Reason)
 	}
-	mcpWrite := NativeEvent{
+	mcpCall := NativeEvent{
 		Kind:      NativeEventBeforeTool,
 		SessionID: sessionID,
 		TurnID:    "turn-2",
 		Action:    NativeActionMCP,
 	}
-	dec, _ = ApplyNativeWorkflow(opts, mcpWrite)
-	if !dec.Block || dec.Reason != mcpDenyReason {
-		t.Fatalf("MCP 应被阻断，实际: block=%v, reason=%s", dec.Block, dec.Reason)
+	dec, _ = ApplyNativeWorkflow(opts, mcpCall)
+	if dec.Block {
+		t.Fatalf("有会话的 MCP 应放行，实际: %s", dec.Reason)
 	}
 
 	nextTurn := NativeEvent{
@@ -358,12 +358,16 @@ func TestNativeRejectsMissingSessionAndRootConflict(t *testing.T) {
 	tempDir := t.TempDir()
 	opts := NativeEventOptions{Host: "cursor", RootDir: tempDir, WorkDir: tempDir, RecordDir: filepath.Join(tempDir, "records")}
 	dec, err := ApplyNativeWorkflow(opts, NativeEvent{Kind: NativeEventBeforeTool, Action: NativeActionEdit, Targets: []string{"a.go"}})
-	if err == nil || !dec.Block || !strings.Contains(dec.Reason, "会话") {
-		t.Fatalf("缺会话标识应拒绝受控写入: err=%v dec=%+v", err, dec)
+	if err == nil || !dec.Block || !strings.Contains(dec.Reason, "拒绝工具调用") {
+		t.Fatalf("缺会话标识应拒绝工具调用: err=%v dec=%+v", err, dec)
 	}
 	dec, err = ApplyNativeWorkflow(opts, NativeEvent{Kind: NativeEventBeforeTool, Action: NativeActionShell, Command: "git status"})
-	if err == nil || !dec.Block || !strings.Contains(dec.Reason, "会话") {
+	if err == nil || !dec.Block || !strings.Contains(dec.Reason, "拒绝工具调用") {
 		t.Fatalf("缺会话标识应拒绝 Shell: err=%v dec=%+v", err, dec)
+	}
+	dec, err = ApplyNativeWorkflow(opts, NativeEvent{Kind: NativeEventBeforeTool, Action: NativeActionRead, Targets: []string{"README.md"}})
+	if err == nil || !dec.Block || !strings.Contains(dec.Reason, "拒绝工具调用") {
+		t.Fatalf("缺会话标识应拒绝 Read: err=%v dec=%+v", err, dec)
 	}
 	dec, err = ApplyNativeWorkflow(opts, NativeEvent{
 		Kind: NativeEventSubmit, SessionID: "s1", TurnID: "t1", Text: "x", TrustedUser: true,
@@ -418,6 +422,19 @@ func TestNativeShellFollowsFileConfirmation(t *testing.T) {
 	})
 	if early.Block {
 		t.Fatalf("有会话的 Shell 应在诊断检查之前放行，实际: %+v", early)
+	}
+	earlyOther, _ := ApplyNativeWorkflow(opts, NativeEvent{
+		Kind: NativeEventBeforeTool, SessionID: sessionID, TurnID: "turn-1",
+		Action: NativeActionOther,
+	})
+	if earlyOther.Block {
+		t.Fatalf("有会话的 Other（如 Task/Grep）应在诊断检查之前放行，实际: %+v", earlyOther)
+	}
+	noSessionOther, _ := ApplyNativeWorkflow(opts, NativeEvent{
+		Kind: NativeEventBeforeTool, Action: NativeActionOther,
+	})
+	if !noSessionOther.Block {
+		t.Fatalf("没有会话标识的 Other 应拒绝，实际: %+v", noSessionOther)
 	}
 
 	submit, err := ApplyNativeWorkflow(opts, NativeEvent{

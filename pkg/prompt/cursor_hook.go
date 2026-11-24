@@ -269,6 +269,9 @@ func HandleCursorEvent(opts CursorEventOptions) (CursorEventResult, error) {
 		stdout, _ := json.Marshal(map[string]any{"continue": true})
 		return CursorEventResult{Stdout: stdout, Stderr: stderr, State: state}, nil
 	case "preToolUse":
+		if strings.TrimSpace(body.ConversationID) == "" {
+			return denied(opts.Event, "缺少会话标识，拒绝工具调用"), nil
+		}
 		state, loadErr := loadOrEmpty(recordDir, requestID, dirErr)
 		if isToolActionWrite(body.ToolName, body.ToolInput) {
 			if loadErr != nil || state.DeliveryEvidence == "" {
@@ -539,7 +542,7 @@ func isKnownReadToolName(name string) bool {
 	}
 }
 
-// classifyToolAction 将宿主工具名映射为统一动作；未知工具不得当成读取。
+// classifyToolAction 只把已知文件编辑工具标成 Edit。其余工具不做策略判断。
 func classifyToolAction(toolName string, input map[string]any) (NativeAction, []string, string) {
 	if isNativeFileWrite(toolName) {
 		targets := []string{}
@@ -564,12 +567,9 @@ func classifyToolAction(toolName string, input map[string]any) (NativeAction, []
 	return NativeActionOther, nil, ""
 }
 
-// isToolActionWrite 把文件编辑和 MCP 视为写入。Shell 不进入文件确认门。
+// isToolActionWrite 只认结构化文件编辑。MCP、Shell 与其它工具不进入文件确认门。
 func isToolActionWrite(name string, _ map[string]any) bool {
-	if isNativeFileWrite(name) {
-		return true
-	}
-	return strings.Contains(strings.ToLower(strings.TrimSpace(name)), "mcp")
+	return isNativeFileWrite(name)
 }
 
 func isWriteTool(name string) bool {

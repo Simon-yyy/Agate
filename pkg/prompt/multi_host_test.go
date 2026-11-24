@@ -73,7 +73,7 @@ func TestAntigravityAdapterProtocol(t *testing.T) {
 		t.Fatalf("续跑不应重新注入上下文: %s", res.Stdout)
 	}
 
-	// 2. 未知工具不得当成读取；write_to_file 在确认前必须拒绝
+	// 2. 文件写入工具不得当成读取；write_to_file 在确认前必须拒绝
 	payloadTool := []byte(`{"conversationId":"ag-1","invocationId":"inv-1","toolCall":{"name":"write_to_file","args":{"path":"src/foo.go"}}}`)
 	opts.EventName = "PreToolUse"
 	opts.Payload = payloadTool

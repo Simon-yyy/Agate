@@ -170,11 +170,9 @@ func clearNativePlan(snap *NativeSnapshot) {
 	snap.DiagnosisSummary = ""
 }
 
-const mcpDenyReason = "MCP 不能借用文件方案授权"
-
 func requireControlledSession(event NativeEvent, opts NativeEventOptions, snap NativeSnapshot, workspace string) (NativeDecision, bool) {
 	if strings.TrimSpace(event.SessionID) == "" {
-		return NativeDecision{Block: true, Reason: "缺少会话标识，拒绝受控写入"}, true
+		return NativeDecision{Block: true, Reason: "缺少会话标识，拒绝工具调用"}, true
 	}
 	if claimedRootsConflict(workspace, event.ClaimedRoots) {
 		return NativeDecision{Block: true, Reason: "声明工作区与当前根目录冲突，拒绝受控写入"}, true
@@ -202,12 +200,9 @@ func ApplyNativeWorkflow(opts NativeEventOptions, event NativeEvent) (NativeDeci
 
 	sessionID := strings.TrimSpace(event.SessionID)
 	if sessionID == "" {
-		// 受控操作必须带会话标识。读取可以没有会话。
+		// 工具调用必须带会话标识。放行与否不靠工具名猜测。
 		if event.Kind == NativeEventBeforeTool {
-			if event.Action == NativeActionRead {
-				return NativeDecision{Block: false}, nil
-			}
-			return NativeDecision{Block: true, Reason: "缺少会话标识，拒绝受控写入"}, fmt.Errorf("缺少会话标识")
+			return NativeDecision{Block: true, Reason: "缺少会话标识，拒绝工具调用"}, fmt.Errorf("缺少会话标识")
 		}
 		if event.Kind == NativeEventSubmit || event.Kind == NativeEventReadCompleted || event.Kind == NativeEventResponseCompleted {
 			return NativeDecision{Block: true, Reason: "缺少会话标识"}, fmt.Errorf("缺少会话标识")
@@ -380,18 +375,14 @@ func ApplyNativeWorkflow(opts NativeEventOptions, event NativeEvent) (NativeDeci
 			return nil
 
 		case NativeEventBeforeTool:
-			if event.Action == NativeActionRead {
-				decision = NativeDecision{Block: false}
-				return nil
-			}
-
 			if dec, blocked := requireControlledSession(event, opts, snap, workspace); blocked {
 				decision = dec
 				actionErr = fmt.Errorf("%s", dec.Reason)
 				return nil
 			}
 
-			if event.Action == NativeActionShell {
+			// 只门禁结构化文件编辑。其余工具由宿主 Agent 按规约判断，这里不看命令文本、不看诊断。
+			if event.Action != NativeActionEdit {
 				decision = NativeDecision{Block: false}
 				return nil
 			}
@@ -424,30 +415,20 @@ func ApplyNativeWorkflow(opts NativeEventOptions, event NativeEvent) (NativeDeci
 				return nil
 			}
 
-			if event.Action == NativeActionMCP {
-				decision = NativeDecision{Block: true, Reason: mcpDenyReason}
+			if len(event.Targets) == 0 {
+				decision = NativeDecision{Block: true, Reason: "缺少明确目标文件，无法核验修改范围"}
 				return nil
 			}
-
-			if event.Action == NativeActionEdit {
-				if len(event.Targets) == 0 {
-					decision = NativeDecision{Block: true, Reason: "缺少明确目标文件，无法核验修改范围"}
+			for _, target := range event.Targets {
+				if !IsTargetInConfirmedScope(target, snap.ConfirmedFiles, workspace) {
+					decision = NativeDecision{
+						Block:  true,
+						Reason: fmt.Sprintf("目标文件 %q 超出已确认方案范围 %v", target, snap.ConfirmedFiles),
+					}
 					return nil
 				}
-				for _, target := range event.Targets {
-					if !IsTargetInConfirmedScope(target, snap.ConfirmedFiles, workspace) {
-						decision = NativeDecision{
-							Block:  true,
-							Reason: fmt.Sprintf("目标文件 %q 超出已确认方案范围 %v", target, snap.ConfirmedFiles),
-						}
-						return nil
-					}
-				}
-				decision = NativeDecision{Block: false}
-				return nil
 			}
-
-			decision = NativeDecision{Block: true, Reason: "未知工具动作，默认阻断"}
+			decision = NativeDecision{Block: false}
 			return nil
 
 		case NativeEventObserve:
