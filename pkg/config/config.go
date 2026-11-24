@@ -357,6 +357,8 @@ func applyToLayer(layer *layerData, section, key, raw string) error {
 			profile.EnvKeys, err = parseArray(raw)
 		case "term_programs":
 			profile.TermPrograms, err = parseArray(raw)
+		case "process_names":
+			profile.ProcessNames, err = parseArray(raw)
 		case "frontmatter":
 			err = parseString(raw, &profile.Frontmatter)
 		default:
@@ -452,6 +454,9 @@ func formatProfileSection(name string, p agent.Profile) string {
 	}
 	if len(p.TermPrograms) > 0 {
 		fmt.Fprintf(&b, "term_programs = %s\n", formatStringArray(p.TermPrograms))
+	}
+	if len(p.ProcessNames) > 0 {
+		fmt.Fprintf(&b, "process_names = %s\n", formatStringArray(p.ProcessNames))
 	}
 	if p.Frontmatter != "" {
 		fmt.Fprintf(&b, "frontmatter = %s\n", strconv.Quote(p.Frontmatter))

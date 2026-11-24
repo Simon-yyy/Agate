@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	agentinfo "agate/pkg/agent"
 )
 
 func TestDistributeRules(t *testing.T) {
@@ -67,10 +69,14 @@ func TestResolveTargets(t *testing.T) {
 		t.Errorf("显式指定 cursor 失败，得到: %v, err: %v", res, err)
 	}
 
-	// 2. 显式指定 all
+	// 2. 显式指定 all：与内置注册表同源
 	resAll, err := ResolveTargets([]string{"all"}, tempDir)
-	if err != nil || len(resAll) != 5 || resAll[4] != TargetCodex {
-		t.Errorf("指定 all 预期包含 5 个目标及 codex，得到: %v, err: %v", resAll, err)
+	builtin := agentinfo.All()
+	if err != nil || len(resAll) != len(builtin) {
+		t.Errorf("指定 all 预期包含 %d 个内置目标，得到: %v, err: %v", len(builtin), resAll, err)
+	}
+	if len(resAll) > 0 && resAll[0] != TargetCodex {
+		t.Errorf("all 列表应与注册表稳定顺序一致，首项预期 codex，得到: %v", resAll[0])
 	}
 
 	// 3. 无法识别的空白目录要求用户显式选择，避免猜测工具。

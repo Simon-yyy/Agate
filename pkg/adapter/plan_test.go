@@ -358,25 +358,25 @@ func TestPlanReverseOverlapReadingDiagnostics(t *testing.T) {
 func TestFrontmatterMarkdownAndPointerFormats(t *testing.T) {
 	root := t.TempDir()
 	custom := map[string]agent.Profile{
-		"trae": {
+		"custom-mdc": {
 			Path:      ".cursor/rules/agate.mdc",
 			Format:    "frontmatter-md",
 			Confirmed: true,
 			Source:    "Cursor MDC 手册",
 			Version:   "1.0",
 		},
-		"cline": {
-			Path:      ".clinerules",
+		"custom-pointer": {
+			Path:      ".customrules",
 			Format:    "pointer",
 			Confirmed: true,
-			Source:    "Cline 手册",
+			Source:    "Custom 手册",
 			Version:   "1.0",
-			Reads:     []string{".clinerules", "AGENTS.md"},
+			Reads:     []string{".customrules", "AGENTS.md"},
 		},
 	}
 
 	rulesV1 := "完整长篇规约正文 V1：严禁全仓盲扫，遵守两阶段门禁。"
-	plan, err := BuildPlan(root, []byte(rulesV1), []AgentTarget{TargetCodex, "trae", "cline"}, custom, false)
+	plan, err := BuildPlan(root, []byte(rulesV1), []AgentTarget{TargetCodex, "custom-mdc", "custom-pointer"}, custom, false)
 	if err != nil {
 		t.Fatalf("构建计划失败: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestFrontmatterMarkdownAndPointerFormats(t *testing.T) {
 		t.Fatalf("读取 .mdc 文件失败: %v", err)
 	}
 	mdcText := string(mdcData)
-	if !strings.HasPrefix(mdcText, "---\ndescription: Agate Engineering Guardrails\nalwaysApply: true\n---\n\n<!-- agate:trae-rules:start -->") {
+	if !strings.HasPrefix(mdcText, "---\ndescription: Agate Engineering Guardrails\nalwaysApply: true\n---\n\n<!-- agate:custom-mdc-rules:start -->") {
 		t.Fatalf("frontmatter-md 创建格式不符合预期:\n%s", mdcText)
 	}
 
@@ -401,7 +401,7 @@ func TestFrontmatterMarkdownAndPointerFormats(t *testing.T) {
 	}
 
 	rulesV2 := "完整长篇规约正文 V2：新增开放式工具扩展。"
-	planV2, err := BuildPlan(root, []byte(rulesV2), []AgentTarget{TargetCodex, "trae", "cline"}, custom, false)
+	planV2, err := BuildPlan(root, []byte(rulesV2), []AgentTarget{TargetCodex, "custom-mdc", "custom-pointer"}, custom, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestFrontmatterMarkdownAndPointerFormats(t *testing.T) {
 	}
 
 	// 验证 pointer 模式写入精炼引导块，且 inspect Digest 与完整规约一致
-	clineData, err := os.ReadFile(filepath.Join(root, ".clinerules"))
+	clineData, err := os.ReadFile(filepath.Join(root, ".customrules"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestFrontmatterMarkdownAndPointerFormats(t *testing.T) {
 		}
 	}
 
-	planCheck, err := BuildPlan(root, []byte(rulesV2), []AgentTarget{TargetCodex, "trae", "cline"}, custom, false)
+	planCheck, err := BuildPlan(root, []byte(rulesV2), []AgentTarget{TargetCodex, "custom-mdc", "custom-pointer"}, custom, false)
 	if err != nil {
 		t.Fatal(err)
 	}

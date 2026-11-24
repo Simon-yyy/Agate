@@ -26,6 +26,7 @@ func newInitCommand() *cobra.Command {
 func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Command {
 	var targets []string
 	var noHook, dryRun, allowTracked bool
+	var nativeHooksMode string
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "为当前项目挂载 agate 护栏体系",
@@ -40,6 +41,7 @@ func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Co
 			defer func() {
 				targets = nil
 				noHook, dryRun, allowTracked = false, false, false
+				nativeHooksMode = "auto"
 			}()
 			origPwd, err := os.Getwd()
 			if err != nil {
@@ -93,7 +95,20 @@ func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Co
 			} else if len(inputs) == 0 && detected {
 				selection = "当前 Agent 环境"
 			} else if len(inputs) == 0 {
-				selection = "已有规则入口（当前 Agent 未识别）"
+				existing := adapter.DetectExistingTargets(pwd)
+				if data, err := os.ReadFile(filepath.Join(pwd, "AGENTS.md")); err == nil && strings.Contains(string(data), adapter.CodexRulesStart) {
+					existing = append(existing, agentinfo.Codex)
+				}
+				if len(existing) > 0 {
+					cmd.Printf("[i] 仓库中检测到已有规则入口线索: %v\n", existing)
+					cmd.Printf("👉 请使用 -t <工具名> 显式指定装配目标，例如:\n")
+					for _, ext := range existing {
+						cmd.Printf("   agate init -t %s\n", ext)
+					}
+				} else {
+					cmd.Printf("👉 请通过 -t/--targets 选择工具（如 agate init -t cursor），未知工具需先声明档案\n")
+				}
+				return fmt.Errorf("未识别当前 Agent，已停止自动分发；请通过 -t/--targets 指定装配目标")
 			}
 			resolved, err := adapter.ResolveTargetsWithProfiles(inputs, pwd, detectedAgent, detected, cfg.Agent.Profiles)
 			if err != nil {
@@ -131,14 +146,60 @@ func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Co
 			}
 			printEditorSuggestions(cmd, plan, resolved)
 			if plan.HasConflicts() {
+				hasTrackedConflict := false
+				for _, entry := range plan.Entries() {
+					if entry.Action == "conflict" && entry.Tracked {
+						hasTrackedConflict = true
+						break
+					}
+				}
+				if hasTrackedConflict {
+					cmd.Println("[👉 操作指引] 检测到部分规则文件（如 AGENTS.md）已被 Git 跟踪。若确认覆盖更新，请追加 --allow-tracked 参数；或使用 -t <目标> 单独初始化目标工具。")
+				}
 				return fmt.Errorf("分发计划存在冲突，工程未初始化；请处理冲突后重新预览")
 			}
+			nativeMode, modeErr := agentinfo.ParseNativeMode(nativeHooksMode)
+			if modeErr != nil {
+				return modeErr
+			}
+			nativeRt := agentinfo.DetectNativeRuntime(detectionCtx, pwd)
+			var hookPlans []*adapter.NativeHookPlan
+			for _, target := range resolved {
+				hp, planErr := adapter.PlanNativeHooksWithOptions(pwd, agentinfo.Kind(target), nativeRt, nativeMode, allowTracked)
+				if planErr != nil {
+					return planErr
+				}
+				if hp == nil {
+					continue
+				}
+				if hp.Conflict {
+					cmd.Printf("[原生 Hook 冲突] %s: %s\n", hp.Target, hp.Reason)
+					return fmt.Errorf("原生 Hook 计划存在冲突，规则与 Hook 均未写入；请处理冲突后重试")
+				}
+				if hp.Skipped {
+					if hp.Reason != "" {
+						cmd.Printf("[原生 Hook 跳过] %s: %s\n", hp.Target, hp.Reason)
+					}
+					continue
+				}
+				hookPlans = append(hookPlans, hp)
+			}
+
 			if dryRun {
+				for _, hp := range hookPlans {
+					cmd.Printf("[原生 Hook 预览] 将为 %s 合并写入配置文件: %s\n", hp.Target, hp.Path)
+				}
 				cmd.Println("[预览完成] 未写入规则、地图或 Git 配置")
 				return nil
 			}
 			if err := plan.Apply(); err != nil {
 				return err
+			}
+			for _, hp := range hookPlans {
+				if err := adapter.ExecuteNativeHookPlan(hp); err != nil {
+					return fmt.Errorf("规则已写入，原生 Hook 未写入: %w", err)
+				}
+				cmd.Printf("[+] 已合并装配 %s 原生 Hook -> %s\n", hp.Target, hp.Path)
 			}
 			projectName := filepath.Base(pwd)
 			cmd.Printf("[agate] 正在为工程 [%s] 装配其余护栏...\n", projectName)
@@ -193,6 +254,7 @@ func newInitCommandWithInspector(inspector agentinfo.ProcessInspector) *cobra.Co
 	command.Flags().BoolVar(&noHook, "no-hook", false, "跳过本地 Git 门禁安装")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "只读预览分发计划与并存诊断")
 	command.Flags().BoolVar(&allowTracked, "allow-tracked", false, "明确允许更新计划中的 Git 已跟踪规则文件")
+	command.Flags().StringVar(&nativeHooksMode, "native-hooks", "auto", "原生 Hook 装配模式：auto|off|require")
 	return command
 }
 

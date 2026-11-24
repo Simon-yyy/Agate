@@ -1,5 +1,7 @@
 # 项目模块地图 (MAP.md)
 
+从本页定位命令和源码，再读 [技术契约](contexts/context.md) 核对行为与边界。[设计文档](docs/DESIGN.md) 记录架构设计，[协议规范](docs/SPEC.md) 收录规约和文件格式。
+
 ## 一、 项目架构与工程定位
 
 - **定位**：`agate`（Agent Gate）是一个零外部运行时依赖的单文件 Go 命令行工具，专为 AI 编程助手设计的工程护栏与安全门禁。
@@ -14,10 +16,10 @@
 ### 1. 编译构建与归档
 
 - **版本升级与归档 (Linux/macOS)**：`./scripts/bump.sh [patch|minor|major|<version>]`（支持加 `--release` 自动推送到 GitHub 发布）
-- **版本升级与归档 (Windows)**：`.\scripts\bump.ps1 -Bump [patch|minor|major|<version>] [-Release]`
+- **版本升级与归档 (Windows)**：`.\scripts\bump.ps1 -Type <patch|minor|major|版本>`。仅需重建当前版本时，运行 `.\scripts\archive.cmd`。
 - **本地开发构建**：`go build -mod=vendor -o agate main.go`
 - **跨平台全量归档**：`./scripts/archive.sh`（生成 Windows/Linux/macOS 产物至 `bin/v<version>/`）
-- **Windows 本地归档**：`.\scripts\archive.cmd` (调度 `scripts/archive.ps1`，生成全平台产物至 `bin/v<version>/` 的 windows/linux/darwin 目录)
+- **Windows 本地归档**：`.\scripts\archive.cmd` 调用 `scripts/archive.ps1`，将各平台产物写入 `bin/v<version>/` 下的 `windows`、`linux` 和 `darwin`，并刷新 `bin/agate.exe`。用 `agate --version` 核对 PATH 上实际安装的版本。
 
 ### 2. 闭环自检与校验
 
@@ -29,9 +31,9 @@
 
 ### 3. 工程初始化与治理
 
-- **工程护栏挂载**：`agate init`（可选 `-t all` 或 `-t codex,cursor,antigravity`；选择顺序为显式目标、项目默认装配集合、当前 Agent、已有入口；无法确定时要求显式选择）
+- **工程护栏挂载**：`agate init` 优先采用显式 `-t`，其次为有效配置中的 `agent.targets`，再尝试从当前环境确定工具。无法确定时，命令列出发现的入口，并提示用 `agate init -t <工具>` 重试。
 - **分发计划预览**：`agate init -t <工具> --dry-run`（只读展示创建、更新、跳过与冲突，列出已有入口及潜在重叠读取）；Git 已跟踪规则需要 `--allow-tracked` 明确允许更新。
-- **开放工具档案管理**：`agate profile [list|add <name>]`（支持 `--path`、`--format markdown|frontmatter-md|pointer`、`--env`、`--term-program`、`--reads`、`--frontmatter`、`--global`、`--local`，免改源码扩展任意新兴 AI 编程工具）
+- **开放工具档案管理**：`agate profile list` 查看工具档案。用 `agate profile add <名称> --path <相对路径>` 注册自定义工具。可用 `--process-name`、`--env` 和 `--term-program` 提供识别信号，完整参数见 `agate profile add --help`。
 - **多源环境指纹诊断**：`agate detect [--explain] [--json]`（只读诊断当前 Editor 宿主、Runner 执行者、远程白名单路径、受限祖先进程与跨会话信封状态）
 - **自然语言提示词编译**：`agate prompt "<instruction>" [-s <scope>] [--no-dirty] [--json] [--hook]`（四源物理现场动态锚定、置信度分级、显式范围纠偏与宿主模型指令执行信封编译）
 - **多工具独立窗口视图**：`agate workspace [plan|apply|restore|open <target>]`（支持 `-t cursor,antigravity,windsurf` 逗号分隔多目标或 `all`，在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立规则过滤视图，零侵入 `.vscode/settings.json`）
@@ -81,6 +83,7 @@
   - 支持内置目标：Codex (`AGENTS.md` 受管区块)、Cursor (`.cursorrules`)、Antigravity (`.gemini/GEMINI.md`)、Claude Code (`CLAUDE.md`)、Windsurf (`.windsurfrules`)，并开放支持任意声明式自定义工具档案。
   - 支持优先加载用户全局规约，无全局时降级使用内置单一事实源，并提供历史规约陈旧模式探测（`CheckDeprecatedRulePatterns`，含旧版 `AGENTS.md` 寻路、缺失 `Intent Expansion`、把只读排查直接推向 Plan 及缺失“诊断状态/诊断连续性”告警）与 `PreviewRuleDrift` 只读差异预览。
 - [pkg/adapter/plan.go](pkg/adapter/plan.go)：只读分发计划与执行、三大规则渲染范式（`markdown` 受管区块合并、`frontmatter-md` 保留或生成 YAML Frontmatter 的 `.mdc` 规则、`pointer` 轻量寻路引用引导并内嵌规则哈希摘要）、Git 跟踪保护（含大小写不敏感文件系统下基于 Git 索引与 `os.SameFile` 的物理文件校验）、路径与符号链接检查、过期快照检查、分发写入锁、双向重叠读取及正文版本诊断。诊断不等于客户端加载证明。
+- [pkg/adapter/native_plan.go](pkg/adapter/native_plan.go)：多宿主原生 Hook 配置文件规划器，安全渲染并落盘各宿主 Hook 配置（`.cursor/hooks.json`、`.agents/hooks.json`、`.claude/settings.json`、`.codex/hooks.json`、`.windsurf/hooks.json`），支持 `--native-hooks=auto|off|require` 模式。
 
 ### 3. Git 治理与安全门禁 (`pkg/git/`)
 
@@ -130,12 +133,13 @@
 
 - [pkg/agent/context.go](pkg/agent/context.go)：统一身份感知模型，解耦宿主编辑器（Editor）与执行者（Runner），定义 `known`/`unknown`/`ambiguous` 状态模型、`EffectiveTarget()` 首选装配目标判定与 `HasConflict()` 冲突检测容器。
 - [pkg/agent/registry.go](pkg/agent/registry.go)：多 Agent 协同类型定义（Codex, Cursor, Antigravity, Claude, Windsurf 及开放自定义工具）、支持自定义档案的全候选汇总与冲突仲裁引擎（`InspectContext`/`InspectContextFull`/`DetectEnvironmentFull`：进程级强指纹 `env_keys` 优先于宿主弱指纹 `term_programs`/`gitIPC` 与路径白名单，活跃祖先进程压制跨宿主残留会话变量，冲突时严禁顺序短路盲选）。
-- [pkg/agent/collector.go](pkg/agent/collector.go)：祖先进程证据转换、本地可执行文件精确匹配（已确认 `Cursor.exe`、`Code.exe`、`Code - Insiders.exe`）与远程白名单路径特征匹配器（`.cursor-server` 与 `.vscode-server`）。Windows 默认采集 8 层，Linux 保持 4 层，硬上限 8 层。说明只保留进程名、PID、层级和匹配原因，不记录完整安装路径或命令行。
+- [pkg/agent/collector.go](pkg/agent/collector.go)：把祖先进程转换为 Editor 证据。内置精确匹配 Cursor、Antigravity、Windsurf 和 VS Code 的可执行文件名，也支持档案声明的 `process_names` 与远程服务端白名单路径。Windows 默认采集 8 层，Linux 默认 4 层，硬上限 8 层。
 - [pkg/agent/collector_windows.go](pkg/agent/collector_windows.go)：Windows 进程快照、受限路径与创建时间查询。访问被拒绝、链路断裂、PID 复用或成环时保留已核验节点并降级。
 - [pkg/agent/collector_linux.go](pkg/agent/collector_linux.go)：Linux `/proc` 采集，保持原有行为。
 - [pkg/agent/collector_other.go](pkg/agent/collector_other.go)：其余平台安全降级，不请求提权。
 - [pkg/agent/session.go](pkg/agent/session.go)：跨会话声明上下文协议解析器（`AGATE_SESSION_CONTEXT`，包含长度 ≤512B、版本锁定、凭据防火墙、过期拦截、受控来源白名单 `terminal`/`ssh`/`extension`/`ide`/`ci` 及 `SessionID` 脱敏与终端会话一致性校验）。
-- [pkg/agent/profile.go](pkg/agent/profile.go)：内置入口档案、开放式声明档案（支持 `markdown`、`frontmatter-md`、`pointer` 三种渲染格式，`.md`/`.mdc`/`.rules` 路径后缀及 `env_keys`/`term_programs`/`frontmatter` 属性）、名称和跨平台相对路径校验（含 `verify.cmd`/`verify.sh`/`verify.bat`/`.ignore` 等保留资产保护）；自定义档案不能静默覆写内置工具或声明同路径目标。
+- [pkg/agent/profile.go](pkg/agent/profile.go)：定义内置和自定义工具的规则入口、渲染格式、读取线索及识别信号，并校验工具名、项目内相对路径和可执行文件名。支持 `markdown`、`frontmatter-md` 和 `pointer` 三种格式。
+- [pkg/agent/native_runtime.go](pkg/agent/native_runtime.go)：客户端运行环境感知与原生 Hook 兼容状态映射（支持 `auto`/`off`/`require` 模式探测）。
 
 ### 10. 三层策略配置加载 (`pkg/config/`)
 
@@ -148,7 +152,14 @@
 ### 12. 提示词物理锚定与编译器 (`pkg/prompt/`)
 
 - [pkg/prompt/compiler.go](pkg/prompt/compiler.go)：零模糊词硬编码的确定性物理锚定引擎（提取真实路径与声明模块、区分 `explicit`/`inferred_dirty`/`unresolved` 锚定置信度、支持清晰指令收敛模式与脏文件精简、支持 `--scope` 显式覆写与 `--no-dirty` 脏文件隔离、切片 `MAP.md` 关联模块、提取 `TASK.md` 断点与 `MEMORY.md` 按需准入），合成强制包含 `agate-intent` 解码块、双轨自适应分流、双通道确认、诊断五要素交付要求与局部纠偏重锚定闭环（Correction Loop）的高密度结构化执行信封。
-- [pkg/prompt/cursor_hook.go](pkg/prompt/cursor_hook.go)：已核对的 Cursor 原生事件适配器（`beforeSubmitPrompt` 将编译信封落盘至 `.git/agate/requests/<requestID>.context.md` 并记录会话活跃指针且重入幂等；`postToolUse` 精确匹配当前请求上下文产物读取后记录交付证据；`preToolUse` 在写入/Shell/MCP 工具执行前校验上下文交付与诊断放行条件）。
+- [pkg/prompt/cursor_hook.go](pkg/prompt/cursor_hook.go)：处理 Cursor 的提交、工具调用和回复事件，串联上下文交付、方案登记与原生文件写入授权。事件顺序和判定条件见 [Cursor 原生 Hook 契约](contexts/context.md#cursor-原生-hook)。
+- [pkg/prompt/native_hook.go](pkg/prompt/native_hook.go)：定义统一原生事件模型（`NativeEvent`）、统一判定决策（`NativeDecision`）、分宿主编解码协议适配器接口（`NativeAdapter`）与分发注册表。
+- [pkg/prompt/native_workflow.go](pkg/prompt/native_workflow.go)：跨宿主生命周期状态流转与写入前拦截判定引擎（`ApplyNativeWorkflow`）。文件编辑走上下文交付、诊断状态、用户显式“执行”和文件范围校验。Shell 在会话有效后、进入诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。规则见 [多宿主统一 Native Hook 契约](contexts/context.md#多宿主统一-native-hook-契约)。
+- [pkg/prompt/native_store.go](pkg/prompt/native_store.go)：基于 Git worktree 隔离的会话快照持久化与并发互斥锁（存储于 `.git/agate/requests/v2/<host>/<workspace-hash>/`）。
+- [pkg/prompt/antigravity_hook.go](pkg/prompt/antigravity_hook.go)：Antigravity IDE 原生 Hook 适配器，适配 `.agents/hooks.json`（`PreInvocation`, `PostToolUse`, `PostInvocation`, `PreToolUse`, `Stop`）与 `{"decision":"deny","reason":"..."}` 输出契约。`PostInvocation` 无 `response` 时回读 `transcriptPath` 中不超出 `initialNumSteps` 的最后一条 `PLANNER_RESPONSE`；确认轮缺少 TurnID 时绑定当前 `ActiveTurnID`。事件与实机边界见 [Antigravity IDE 原生 Hook](contexts/context.md#antigravity-ide-原生-hook)。
+- [pkg/prompt/claude_hook.go](pkg/prompt/claude_hook.go)：Claude Code 原生 Hook 适配器，适配 `.claude/settings.json` 与 `hookSpecificOutput` 阻断契约。
+- [pkg/prompt/codex_hook.go](pkg/prompt/codex_hook.go)：Codex 原生 Hook 适配器，支持 `apply_patch` 多文件改动范围提取与预写门禁。
+- [pkg/prompt/windsurf_hook.go](pkg/prompt/windsurf_hook.go)：Windsurf Cascade 原生 Hook 适配器，适配 `pre_write_code` 并在拒绝时以退出码 2 与 stderr 阻断。
 - [pkg/prompt/workflow.go](pkg/prompt/workflow.go)：请求状态机、会话活跃指针持久化与诊断连续性校验引擎（`RequestState` 原子落盘、`ValidateDiagnosisOutput` 拦截“有 Plan 无原因说明”与“待验证假设伪装已确认结论”、`UpdateDiagnosisState` 受校验状态流转及 `ReuseAllowed` 跨指令/跨工作区复用拦截）。
 
 ### 13. 可选语义决策适配层（规划）

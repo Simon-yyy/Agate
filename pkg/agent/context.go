@@ -42,6 +42,7 @@ type Evidence struct {
 	TargetAgent string `json:"target_agent"`          // 匹配到的目标工具名称
 	Matched     bool   `json:"matched"`               // 是否成功命中
 	Description string `json:"description,omitempty"` // 不含敏感值的说明摘要
+	Executable  string `json:"-"`                     // 已匹配可执行文件的内部路径，不进入对外 JSON
 }
 
 // Candidate 记录某个候选工具及其支持证据列表。

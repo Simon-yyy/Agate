@@ -117,14 +117,26 @@ func ResolveTargetsWithProfiles(explicitTargets []string, root string, detected 
 		}
 
 		if hasAll {
-			all := []AgentTarget{TargetCursor, TargetAntigravity, TargetClaude, TargetWindsurf, TargetCodex}
+			// 与内置注册表同源，保留自定义档案；旧 gemini 别名由 Parse 归一到 antigravity
+			builtin := agentinfo.All()
+			all := make([]AgentTarget, 0, len(builtin)+len(custom))
+			seenAll := make(map[AgentTarget]bool, len(builtin)+len(custom))
+			for _, kind := range builtin {
+				all = append(all, AgentTarget(kind))
+				seenAll[AgentTarget(kind)] = true
+			}
 			names := make([]string, 0, len(custom))
 			for name := range custom {
 				names = append(names, name)
 			}
 			sort.Strings(names)
 			for _, name := range names {
-				all = append(all, AgentTarget(name))
+				target := AgentTarget(name)
+				if seenAll[target] {
+					continue
+				}
+				all = append(all, target)
+				seenAll[target] = true
 			}
 			return all, nil
 		}
@@ -181,7 +193,8 @@ func DistributeRules(customRules []byte, targets []AgentTarget) error {
 }
 
 const (
-	codexRulesStart = "<!-- agate:codex-rules:start -->"
+	CodexRulesStart = "<!-- agate:codex-rules:start -->"
+	codexRulesStart = CodexRulesStart
 	codexRulesEnd   = "<!-- agate:codex-rules:end -->"
 )
 

@@ -2,7 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
+	"agate/pkg/adapter"
+	agentinfo "agate/pkg/agent"
 	"agate/pkg/git"
 
 	"github.com/spf13/cobra"
@@ -86,9 +90,88 @@ var hookStatusCmd = &cobra.Command{
 	},
 }
 
+var hookNativeCmd = &cobra.Command{
+	Use:   "native",
+	Short: "管理多宿主原生 Hook 配置（status / rollback）",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
+}
+
+var hookNativeStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "查看各宿主原生 Hook 装配与阻塞状态",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		list, err := adapter.ListNativeHookStatus(root)
+		if err != nil {
+			return err
+		}
+		cmd.Println("=== [原生 Hook 状态] ===")
+		for _, st := range list {
+			state := "未安装"
+			if st.Blocked {
+				state = "阻塞"
+			} else if st.Exists && st.HasAgate {
+				state = "已托管"
+			} else if st.Exists {
+				state = "已存在(无 Agate 条目)"
+			}
+			extra := st.Reason
+			if st.Tracked {
+				if extra != "" {
+					extra += "; "
+				}
+				extra += "Git 跟踪"
+			}
+			if extra != "" {
+				cmd.Printf("  • %-16s %s (%s) %s\n", st.Host, state, st.Path, extra)
+			} else {
+				cmd.Printf("  • %-16s %s (%s)\n", st.Host, state, st.Path)
+			}
+		}
+		return nil
+	},
+}
+
+var hookNativeRollbackCmd = &cobra.Command{
+	Use:   "rollback",
+	Short: "回退指定宿主中的 Agate Hook 条目，保留用户自定义条目",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		hostName, _ := cmd.Flags().GetString("host")
+		hostName = strings.ToLower(strings.TrimSpace(hostName))
+		if hostName == "" {
+			return &UsageError{Err: fmt.Errorf("必须指定 --host")}
+		}
+		kind, ok := agentinfo.Parse(hostName)
+		if !ok {
+			return &UsageError{Err: fmt.Errorf("未知宿主 %q", hostName)}
+		}
+		root, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := adapter.RollbackNativeHooks(root, kind); err != nil {
+			return err
+		}
+		cmd.Printf("[+] 已回退 %s 的 Agate 原生 Hook 条目\n", kind)
+		return nil
+	},
+}
+
 func init() {
+	hookNativeRollbackCmd.Flags().String("host", "", "要回退的宿主名称（cursor/claude/codex/windsurf/antigravity）")
+	hookNativeCmd.AddCommand(hookNativeStatusCmd)
+	hookNativeCmd.AddCommand(hookNativeRollbackCmd)
 	hookCmd.AddCommand(hookInstallCmd)
 	hookCmd.AddCommand(hookUninstallCmd)
 	hookCmd.AddCommand(hookStatusCmd)
+	hookCmd.AddCommand(hookNativeCmd)
 	rootCmd.AddCommand(hookCmd)
 }

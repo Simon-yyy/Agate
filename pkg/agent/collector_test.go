@@ -152,11 +152,27 @@ func TestInspectProcessAncestors_LocalEditors(t *testing.T) {
 			wantHit:   true,
 		},
 		{
-			name: "Code - Insiders.exe 识别为 vscode",
+			name: "本地 Code - Insiders.exe 识别为 vscode",
 			chain: []ProcessInfo{
 				{PID: 12, PPID: 1, Path: `D:\VS Code Insiders\Code - Insiders.exe`, Name: "Code - Insiders.exe"},
 			},
 			wantAgent: "vscode",
+			wantHit:   true,
+		},
+		{
+			name: "本地 Antigravity IDE.exe 识别为 antigravity",
+			chain: []ProcessInfo{
+				{PID: 13, PPID: 1, Path: `C:\Users\dev\AppData\Local\Programs\Antigravity\Antigravity IDE.exe`, Name: "Antigravity IDE.exe"},
+			},
+			wantAgent: "antigravity",
+			wantHit:   true,
+		},
+		{
+			name: "本地 windsurf.exe 识别为 windsurf",
+			chain: []ProcessInfo{
+				{PID: 14, PPID: 1, Path: `D:\Windsurf\windsurf.exe`, Name: "windsurf.exe"},
+			},
+			wantAgent: "windsurf",
 			wantHit:   true,
 		},
 		{
@@ -233,5 +249,43 @@ func TestInspectProcessAncestors_Degraded(t *testing.T) {
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("降级时预期产生 1 条警告，实际: %d", len(warnings))
+	}
+}
+
+func TestInspectProcessAncestorsWithProfiles_CustomProfile(t *testing.T) {
+	customProfiles := map[string]Profile{
+		"my-custom-editor": {
+			Path:         ".myrules",
+			Format:       "markdown",
+			Confirmed:    true,
+			ProcessNames: []string{"custom-editor.exe"},
+		},
+	}
+	mock := &mockProcessInspector{
+		chain: []ProcessInfo{
+			{PID: 100, PPID: 1, Path: `D:\tools\custom-editor.exe`, Name: "custom-editor.exe"},
+		},
+	}
+	evs, warnings := InspectProcessAncestorsWithProfiles(mock, 100, 4, customProfiles)
+	if len(warnings) != 0 {
+		t.Fatalf("不应产生警告: %v", warnings)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("预期命中 1 条自定义档案进程证据，实际: %d", len(evs))
+	}
+	if evs[0].TargetAgent != "my-custom-editor" {
+		t.Fatalf("目标 Agent 预期为 my-custom-editor，实际: %s", evs[0].TargetAgent)
+	}
+}
+
+func TestInspectProcessAncestorsWithProfiles_ConflictingNames(t *testing.T) {
+	profiles := map[string]Profile{
+		"first":  {ProcessNames: []string{"shared.exe"}},
+		"second": {ProcessNames: []string{"shared.exe"}},
+	}
+	mock := &mockProcessInspector{chain: []ProcessInfo{{PID: 100, Path: `D:\tools\shared.exe`}}}
+	evidence, _ := InspectProcessAncestorsWithProfiles(mock, 100, 4, profiles)
+	if len(evidence) != 2 {
+		t.Fatalf("两个档案应产生两条证据，实际: %v", evidence)
 	}
 }

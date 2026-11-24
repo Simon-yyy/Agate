@@ -1,10 +1,14 @@
 package prompt
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"agate/pkg/harness"
 )
 
 func TestRepairPlanRequiresDiagnosis(t *testing.T) {
@@ -115,5 +119,71 @@ func TestUpdateDiagnosisStateEnforcesEvidence(t *testing.T) {
 	}
 	if updated.Diagnosis != DiagnosisConfirmed {
 		t.Fatalf("诊断状态应为 confirmed，实际: %s", updated.Diagnosis)
+	}
+}
+
+func TestSaveRequestStateOverwriteAndConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	id := "req-overwrite"
+	first := RequestState{RequestID: id, CompileStatus: "first", Diagnosis: DiagnosisUndiagnosed}
+	if err := SaveRequestState(dir, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.CompileStatus = "second"
+	if err := SaveRequestState(dir, second); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadRequestState(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.CompileStatus != "second" {
+		t.Fatalf("覆盖后应读到新内容，实际: %s", loaded.CompileStatus)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("覆盖后应只保留目标文件，实际: %v %v", entries, err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			st := second
+			st.CompileStatus = fmt.Sprintf("concurrent-%d", n)
+			_ = SaveRequestState(dir, st)
+		}(i)
+	}
+	wg.Wait()
+	if _, err := LoadRequestState(dir, id); err != nil {
+		t.Fatalf("并发保存后记录应仍可解析: %v", err)
+	}
+}
+
+func TestWriteFileAtomicOverwritesDespiteReplacingDir(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(dst, []byte(`{"compile_status":"old"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backup := dst + ".replacing"
+	if err := os.MkdirAll(backup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backup, "lock"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newer := []byte(`{"compile_status":"new"}`)
+	if err := harness.WriteFileAtomic(dst, newer, 0o600); err != nil {
+		t.Fatalf("已有 .replacing 目录时仍应完成覆盖: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(newer) {
+		t.Fatalf("覆盖后应读到新内容，实际: %s", got)
 	}
 }

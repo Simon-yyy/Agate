@@ -97,6 +97,7 @@ func newProfileAddCommand() *cobra.Command {
 		version      string
 		envKeys      []string
 		termPrograms []string
+		processNames []string
 		reads        []string
 		frontmatter  string
 		useGlobal    bool
@@ -109,6 +110,7 @@ func newProfileAddCommand() *cobra.Command {
 		version = "1.0"
 		envKeys = nil
 		termPrograms = nil
+		processNames = nil
 		reads = nil
 		frontmatter = ""
 		useGlobal, useLocal = false, false
@@ -137,6 +139,7 @@ func newProfileAddCommand() *cobra.Command {
 				Reads:        reads,
 				EnvKeys:      envKeys,
 				TermPrograms: termPrograms,
+				ProcessNames: processNames,
 				Frontmatter:  frontmatter,
 			}
 
@@ -175,6 +178,7 @@ func newProfileAddCommand() *cobra.Command {
 	command.Flags().StringVar(&version, "version", "1.0", "适用工具版本说明")
 	command.Flags().StringSliceVar(&envKeys, "env", nil, "自动嗅探的环境变量指纹列表")
 	command.Flags().StringSliceVar(&termPrograms, "term-program", nil, "自动嗅探的 TERM_PROGRAM 子串列表")
+	command.Flags().StringSliceVar(&processNames, "process-name", nil, "祖先进程精确匹配的可执行文件名（可重复指定）")
 	command.Flags().StringSliceVar(&reads, "reads", nil, "该工具可能同时读取的其他规则路径")
 	command.Flags().StringVar(&frontmatter, "frontmatter", "", "frontmatter-md 模式的自定义 YAML Frontmatter 内容")
 	command.Flags().BoolVar(&useGlobal, "global", false, "写入个人全局配置 (~/.agate/config.toml 或 AGATE_GLOBAL_CONFIG)")

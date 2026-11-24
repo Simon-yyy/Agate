@@ -11,11 +11,19 @@ import (
 type Kind string
 
 const (
-	Codex       Kind = "codex"
-	Cursor      Kind = "cursor"
-	Antigravity Kind = "antigravity"
-	Claude      Kind = "claude"
-	Windsurf    Kind = "windsurf"
+	Codex          Kind = "codex"
+	Cursor         Kind = "cursor"
+	Antigravity    Kind = "antigravity"
+	Claude         Kind = "claude"
+	Windsurf       Kind = "windsurf"
+	Copilot        Kind = "copilot"
+	Trae           Kind = "trae"
+	OpenCode       Kind = "opencode"
+	QwenCode       Kind = "qwen-code"
+	Cline          Kind = "cline"
+	Kiro           Kind = "kiro"
+	AntigravityCLI Kind = "antigravity-cli"
+	GeminiCLI      Kind = "gemini-cli"
 )
 
 type spec struct {
@@ -32,6 +40,14 @@ var specs = []spec{
 	{kind: Antigravity, aliases: []string{"antigravity", "gemini"}, envKeys: []string{"ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE"}, termPrograms: []string{"antigravity"}},
 	{kind: Claude, aliases: []string{"claude"}, envKeys: []string{"CLAUDE_CODE", "CLAUDE_AGENT"}, termPrograms: []string{"claude"}},
 	{kind: Windsurf, aliases: []string{"windsurf"}, envKeys: []string{"WINDSURF_AGENT"}, termPrograms: []string{"windsurf"}},
+	{kind: Copilot, aliases: []string{"copilot", "github-copilot"}, envKeys: []string{"COPILOT_AGENT"}, termPrograms: []string{"copilot"}},
+	{kind: Trae, aliases: []string{"trae", "trae-ide"}, envKeys: []string{"TRAE_AGENT"}, termPrograms: []string{"trae"}},
+	{kind: OpenCode, aliases: []string{"opencode"}, envKeys: []string{"OPENCODE_AGENT"}, termPrograms: []string{"opencode"}},
+	{kind: QwenCode, aliases: []string{"qwen-code", "qwen"}, envKeys: []string{"QWEN_AGENT", "QWEN_CODE"}, termPrograms: []string{"qwen"}},
+	{kind: Cline, aliases: []string{"cline"}, envKeys: []string{"CLINE_AGENT"}, termPrograms: []string{"cline"}},
+	{kind: Kiro, aliases: []string{"kiro"}, envKeys: []string{"KIRO_AGENT"}, termPrograms: []string{"kiro"}},
+	{kind: AntigravityCLI, aliases: []string{"antigravity-cli"}, envKeys: []string{"ANTIGRAVITY_CLI"}, termPrograms: []string{"antigravity-cli"}},
+	{kind: GeminiCLI, aliases: []string{"gemini-cli"}, envKeys: []string{"GEMINI_CLI"}, termPrograms: []string{"gemini-cli"}},
 }
 
 // Parse 将用户输入解析为标准 Agent 类型。
@@ -195,8 +211,8 @@ func InspectContextFull(getenv func(string) string, termProgram string, gitIPC s
 		}
 	}
 
-	// 5. 采集受限祖先进程链特征 (ProcessInspector)
-	procEvidences, procWarnings := InspectProcessAncestors(inspector, 0, defaultAncestorDepth())
+	// 5. 采集受限祖先进程链特征 (ProcessInspector，支持内置与自定义 profiles 进程特征)
+	procEvidences, procWarnings := InspectProcessAncestorsWithProfiles(inspector, 0, defaultAncestorDepth(), custom)
 	ctx.Warnings = append(ctx.Warnings, procWarnings...)
 	for _, ev := range procEvidences {
 		ctx.Evidences = append(ctx.Evidences, ev)

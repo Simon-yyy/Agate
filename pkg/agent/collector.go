@@ -5,6 +5,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -48,6 +49,10 @@ func normalizeAncestorDepth(maxDepth int) int {
 // matchLocalEditorProcess 按已确认的本地可执行文件名识别 Editor。
 // 只接受当前祖先进程上的完整路径，目录名或近似文件名不算命中。
 func matchLocalEditorProcess(info ProcessInfo) (string, bool) {
+	return matchLocalEditorProcessWithProfiles(info, nil)
+}
+
+func matchLocalEditorProcessWithProfiles(info ProcessInfo, custom map[string]Profile) (string, bool) {
 	if strings.TrimSpace(info.Path) == "" {
 		return "", false
 	}
@@ -58,9 +63,31 @@ func matchLocalEditorProcess(info ProcessInfo) (string, bool) {
 		return "cursor", true
 	case "code.exe", "code - insiders.exe":
 		return "vscode", true
-	default:
-		return "", false
+	case "antigravity ide.exe", "antigravity.exe":
+		return "antigravity", true
+	case "windsurf.exe":
+		return "windsurf", true
+	case "trae.exe":
+		return "trae", true
+	case "kiro.exe":
+		return "kiro", true
 	}
+	if len(custom) > 0 {
+		names := make([]string, 0, len(custom))
+		for name := range custom {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			p := custom[name]
+			for _, pn := range p.ProcessNames {
+				if strings.ToLower(strings.TrimSpace(pn)) == base {
+					return name, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 // PathWhitelistRule 远程白名单路径特征规则。
@@ -193,8 +220,13 @@ func InspectPathEnvironments(getenv func(string) string) []Evidence {
 	return evidences
 }
 
-// InspectProcessAncestors 使用指定的 ProcessInspector 扫描祖先进程并匹配白名单特征。
+// InspectProcessAncestors 使用指定的 ProcessInspector 扫描祖先进程并匹配白名单特征（兼容旧签名）。
 func InspectProcessAncestors(inspector ProcessInspector, pid int, maxDepth int) ([]Evidence, []string) {
+	return InspectProcessAncestorsWithProfiles(inspector, pid, maxDepth, nil)
+}
+
+// InspectProcessAncestorsWithProfiles 使用指定的 ProcessInspector 扫描祖先进程，并支持通过自定义 profiles 匹配进程。
+func InspectProcessAncestorsWithProfiles(inspector ProcessInspector, pid int, maxDepth int, custom map[string]Profile) ([]Evidence, []string) {
 	if inspector == nil {
 		inspector = &DefaultProcessInspector{}
 	}
@@ -212,23 +244,41 @@ func InspectProcessAncestors(inspector ProcessInspector, pid int, maxDepth int) 
 		if ok {
 			evidences = append(evidences, ev)
 		}
+		if strings.TrimSpace(p.Path) == "" {
+			continue
+		}
+		base := path.Base(strings.ReplaceAll(p.Path, "\\", "/"))
+		for name, profile := range custom {
+			for _, processName := range profile.ProcessNames {
+				if strings.EqualFold(strings.TrimSpace(processName), base) && (!ok || ev.TargetAgent != name) {
+					evidences = append(evidences, Evidence{Source: EvidenceSourceProcess, Key: fmt.Sprintf("pid_%d", p.PID), TargetRole: "editor", TargetAgent: name, Matched: true, Executable: p.Path, Description: fmt.Sprintf("祖先进程 [%d:%s] 第 %d 级匹配自定义档案", p.PID, base, level)})
+					break
+				}
+			}
+		}
 	}
 
 	return evidences, warnings
 }
 
-// evidenceFromAncestor 把已核验路径转成 Editor 证据。说明只保留进程名、PID、层级和匹配原因。
+// evidenceFromAncestor 把已核验路径转成 Editor 证据。
 func evidenceFromAncestor(p ProcessInfo, level int) (Evidence, bool) {
+	return evidenceFromAncestorWithProfiles(p, level, nil)
+}
+
+// evidenceFromAncestorWithProfiles 支持传入 profiles 把已核验路径转成 Editor 证据。
+func evidenceFromAncestorWithProfiles(p ProcessInfo, level int, custom map[string]Profile) (Evidence, bool) {
 	if strings.TrimSpace(p.Path) == "" {
 		return Evidence{}, false
 	}
-	if agentName, ok := matchLocalEditorProcess(p); ok {
+	if agentName, ok := matchLocalEditorProcessWithProfiles(p, custom); ok {
 		return Evidence{
 			Source:      EvidenceSourceProcess,
 			Key:         fmt.Sprintf("pid_%d", p.PID),
 			TargetRole:  "editor",
 			TargetAgent: agentName,
 			Matched:     true,
+			Executable:  p.Path,
 			Description: fmt.Sprintf("祖先进程 [%d:%s] 第 %d 级精确匹配本地可执行文件", p.PID, filepath.Base(strings.ReplaceAll(p.Path, "\\", "/")), level),
 		}, true
 	}
@@ -246,6 +296,7 @@ func evidenceFromAncestor(p ProcessInfo, level int) (Evidence, bool) {
 		TargetRole:  rule.Role,
 		TargetAgent: rule.Agent,
 		Matched:     true,
+		Executable:  p.Path,
 		Description: fmt.Sprintf("祖先进程 [%d:%s] 第 %d 级%s", p.PID, name, level, rule.Description),
 	}, true
 }

@@ -159,10 +159,17 @@ agate profile add continue --path .continue/rules/agate.md --format markdown
   agate prompt "改下锁超时逻辑" -s pkg/relay/lock.go --no-dirty # 显式锁定真实目标并排除工作区无关脏文件干扰
   agate prompt "重构 cmd/root.go" --json                     # 输出结构化 JSON 锚定结果与置信度等级
 
-  # Cursor 原生 Hooks 接入模式（支持 beforeSubmitPrompt / preToolUse / postToolUse，上下文产物落盘与精确读取校验）
+  # Cursor 原生 Hooks。文件编辑仍走上下文已读、诊断、单独「执行」、轮次和文件范围。
+  # Shell 在会话有效后、诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用文件授权。
   agate prompt --hook --host cursor --event beforeSubmitPrompt < event.json
   agate prompt --hook --host cursor --event preToolUse < event.json
   agate prompt --hook --host cursor --event postToolUse < event.json
+
+  # Antigravity IDE 2.8.0 已实机通过。PostInvocation 无 response 时回读 transcriptPath；确认轮无 TurnID 时绑定 ActiveTurnID。
+  # 契约见 contexts/context.md 的「Antigravity IDE 原生 Hook」。版本目录仍为空，init --native-hooks=auto 尚不会按已验收版本自动挂载。
+  agate prompt --hook --host antigravity --event PreInvocation < event.json
+  agate prompt --hook --host antigravity --event PostInvocation < event.json
+  agate prompt --hook --host antigravity --event PreToolUse < event.json
 
   # 受校验的诊断状态更新（与 preToolUse 门禁联动，拦截未诊断盲目出方案与写入）
   agate prompt --set-diagnosis confirmed --request-id <id> --evidence "现象...原因...依据..."
@@ -406,7 +413,7 @@ graph TD
 .\scripts\archive.cmd
 # 或直接调用：powershell -ExecutionPolicy Bypass -File .\scripts\archive.ps1
 ```
-> 产物将自动输出至 `bin/v<version>/` 目录（包含 `windows/agate.exe`、`linux/agate`、`darwin/agate_amd64`、`darwin/agate_arm64`）。
+> 产物将自动输出至 `bin/v<version>/` 目录（包含 `windows/agate.exe`、`linux/agate`、`darwin/agate_amd64`、`darwin/agate_arm64`）。当前源码版本是 `0.6.5`，本地归档在 `bin/v0.6.5/`。页首 GitHub Release 徽章指向已经发布的版本，不表示 `0.6.5` 已经上传。
 
 ### 2. 语义化版本升级与云端自动化发布
 ```bash
@@ -419,7 +426,7 @@ graph TD
 ./scripts/bump.sh patch --release
 ```
 
-- **Windows 环境**：对应可运行 `.\scripts\bump.ps1 -Bump patch [-Release]`；
+- **Windows 环境**：对应可运行 `.\scripts\bump.ps1 -Type patch`。加上 `-Release` 才会提交、打标签并推送；
 - 推送标签后，GitHub Actions 流水线将并发交叉编译各平台免安装包并自动创建 [GitHub Release](https://github.com/Simon-yyy/Agate/releases) 供用户下载。
 
 ---

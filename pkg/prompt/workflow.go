@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"agate/pkg/harness"
 )
 
 const RuleVersion = "intent-diagnosis-1"
@@ -34,7 +37,20 @@ type RequestState struct {
 	DeliveryEvidence string          `json:"delivery_evidence,omitempty"`
 	Diagnosis        DiagnosisStatus `json:"diagnosis"`
 	DiagnosisSummary string          `json:"diagnosis_summary,omitempty"`
+	PendingPlan      *pendingPlan    `json:"pending_plan,omitempty"`
+	PlanConfirmed    bool            `json:"plan_confirmed"`
+	ConfirmedFiles   []string        `json:"confirmed_files,omitempty"`
+	ApprovedPlanID   string          `json:"approved_plan_id,omitempty"`
+	ApprovedPlanHash string          `json:"approved_plan_hash,omitempty"`
+	ApprovedAt       *time.Time      `json:"approved_at,omitempty"`
 	Failure          string          `json:"failure,omitempty"`
+}
+
+type pendingPlan struct {
+	ResponseHash string          `json:"response_hash"`
+	Diagnosis    DiagnosisStatus `json:"diagnosis"`
+	Summary      string          `json:"diagnosis_summary,omitempty"`
+	Files        []string        `json:"files"`
 }
 
 // RecordID 把会话和请求标识规范化成文件名，避免把原始标识拼进路径。
@@ -81,11 +97,7 @@ func SaveRequestState(dir string, state RequestState) error {
 		return err
 	}
 	target := filepath.Join(dir, state.RequestID+".json")
-	temp := target + ".tmp"
-	if err := os.WriteFile(temp, body, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, target)
+	return harness.WriteFileAtomic(target, body, 0o600)
 }
 
 // LoadRequestState 读取一条请求记录。
@@ -110,11 +122,7 @@ func SaveContextArtifact(dir, requestID, compiledPrompt string) (string, error) 
 		return "", fmt.Errorf("请求标识不能作为路径")
 	}
 	target := filepath.Join(dir, requestID+".context.md")
-	temp := target + ".tmp"
-	if err := os.WriteFile(temp, []byte(compiledPrompt), 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Rename(temp, target); err != nil {
+	if err := harness.WriteFileAtomic(target, []byte(compiledPrompt), 0o600); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -131,11 +139,7 @@ func SaveSessionActiveRequest(dir, sessionKey, workspace, requestID string) erro
 	}
 	key := hashText(strings.TrimSpace(sessionKey) + "\n" + strings.TrimSpace(workspace))
 	target := filepath.Join(sessionsDir, key+".active")
-	temp := target + ".tmp"
-	if err := os.WriteFile(temp, []byte(requestID), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, target)
+	return harness.WriteFileAtomic(target, []byte(requestID), 0o600)
 }
 
 // LoadSessionActiveRequest 读取某会话最近一次激活的请求 ID。
@@ -238,4 +242,22 @@ func containsAny(text string, keywords ...string) bool {
 		}
 	}
 	return false
+}
+
+// UpdatePlanConfirmation 记录用户对具体方案的授权，绑定确认的目标文件清单。
+func UpdatePlanConfirmation(dir, requestID string, files []string) (RequestState, error) {
+	state, err := LoadRequestState(dir, requestID)
+	if err != nil {
+		return state, err
+	}
+	state.PlanConfirmed = true
+	var cleaned []string
+	for _, f := range files {
+		clean := filepath.ToSlash(strings.TrimSpace(f))
+		if clean != "" {
+			cleaned = append(cleaned, clean)
+		}
+	}
+	state.ConfirmedFiles = cleaned
+	return state, SaveRequestState(dir, state)
 }

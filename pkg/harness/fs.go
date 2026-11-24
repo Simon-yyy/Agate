@@ -1,10 +1,13 @@
 package harness
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
+	"time"
 )
 
 // CopyFile 执行跨平台物理文件拷贝（采用原子写入防止中途崩溃损坏）
@@ -59,13 +62,61 @@ func WriteFileAtomic(dst string, content []byte, perm os.FileMode) error {
 		return fmt.Errorf("设置临时文件权限失败 [%s]: %w", tmpName, err)
 	}
 
-	// 4. 原子重命名替换目标文件
-	if err := os.Rename(tmpName, dst); err != nil {
+	// 4. 原子重命名替换目标文件。访问拒绝时短重试；仍失败则保留原目标文件。
+	if err := replaceAtomicFile(tmpName, dst); err != nil {
 		return fmt.Errorf("原子重命名替换目标文件失败 [%s -> %s]: %w", tmpName, dst, err)
 	}
 
 	cleanTmp = false
 	return nil
+}
+
+// replaceAtomicFile 用临时文件替换目标。Windows 上的短暂占用会重试，最终失败时不删除原文件。
+func replaceAtomicFile(tmpName, dst string) error {
+	attempts := 1
+	if runtime.GOOS == "windows" {
+		attempts = 4
+	}
+	var last error
+	for i := 0; i < attempts; i++ {
+		last = replaceAtomicFileOnce(tmpName, dst)
+		if last == nil || !isTransientReplaceError(last) || i == attempts-1 {
+			return last
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	return last
+}
+
+func replaceAtomicFileOnce(tmpName, dst string) error {
+	if err := os.Rename(tmpName, dst); err == nil {
+		return nil
+	} else if runtime.GOOS != "windows" {
+		return err
+	}
+	backup := dst + ".replacing"
+	_ = os.Remove(backup)
+	if err := os.Rename(dst, backup); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		_ = os.Rename(backup, dst)
+		return err
+	}
+	_ = os.Remove(backup)
+	return nil
+}
+
+func isTransientReplaceError(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	// ERROR_ACCESS_DENIED、ERROR_SHARING_VIOLATION
+	return errno == 5 || errno == 32
 }
 
 // LinkOrCopy 优先尝试符号链接，若在 Windows 或权限受限环境失败，自动平滑降级为物理拷贝

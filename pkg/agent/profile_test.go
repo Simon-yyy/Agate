@@ -62,25 +62,25 @@ func TestCustomProfileFormatsMdcAndFingerprints(t *testing.T) {
 		Source:    "Cline 手册",
 		Version:   "1.0",
 	}
-	got, err := Profiles(map[string]Profile{"trae": mdc, "cline": pointer})
+	got, err := Profiles(map[string]Profile{"custom-trae": mdc, "custom-cline": pointer})
 	if err != nil {
 		t.Fatalf("合法的 frontmatter-md 与 pointer 档案被拒绝: %v", err)
 	}
-	if got["trae"].Format != "frontmatter-md" || got["cline"].Format != "pointer" {
+	if got["custom-trae"].Format != "frontmatter-md" || got["custom-cline"].Format != "pointer" {
 		t.Fatalf("档案格式未保留: %+v", got)
 	}
 
 	for _, badEnv := range [][]string{{""}, {"TRAE AGENT"}, {"TRAE\x1b"}} {
 		bad := mdc
 		bad.EnvKeys = badEnv
-		if _, err := Profiles(map[string]Profile{"trae": bad}); err == nil {
+		if _, err := Profiles(map[string]Profile{"custom-trae": bad}); err == nil {
 			t.Fatalf("非法 env_keys 未被阻断: %v", badEnv)
 		}
 	}
 	for _, badTerm := range [][]string{{""}, {"trae ide"}, {"trae\n"}} {
 		bad := mdc
 		bad.TermPrograms = badTerm
-		if _, err := Profiles(map[string]Profile{"trae": bad}); err == nil {
+		if _, err := Profiles(map[string]Profile{"custom-trae": bad}); err == nil {
 			t.Fatalf("非法 term_programs 未被阻断: %v", badTerm)
 		}
 	}

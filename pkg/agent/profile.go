@@ -19,6 +19,7 @@ type Profile struct {
 	Reads        []string
 	EnvKeys      []string
 	TermPrograms []string
+	ProcessNames []string
 	Frontmatter  string
 	Scope        string
 }
@@ -47,6 +48,7 @@ func BuiltinProfiles() map[Kind]Profile {
 			Reads:        []string{".cursorrules", "AGENTS.md", ".cursor/rules"},
 			EnvKeys:      []string{"CURSOR_AGENT", "CURSOR_VERSION"},
 			TermPrograms: []string{"cursor"},
+			ProcessNames: []string{"cursor.exe"},
 			Scope:        "builtin",
 		},
 		Antigravity: {
@@ -57,6 +59,7 @@ func BuiltinProfiles() map[Kind]Profile {
 			Reads:        []string{".gemini/GEMINI.md"},
 			EnvKeys:      []string{"ANTIGRAVITY_AGENT", "GEMINI_AGENT", "ANTIGRAVITY_IDE"},
 			TermPrograms: []string{"antigravity"},
+			ProcessNames: []string{"antigravity ide.exe", "antigravity.exe"},
 			Scope:        "builtin",
 		},
 		Claude: {
@@ -77,7 +80,82 @@ func BuiltinProfiles() map[Kind]Profile {
 			Reads:        []string{".windsurfrules"},
 			EnvKeys:      []string{"WINDSURF_AGENT"},
 			TermPrograms: []string{"windsurf"},
+			ProcessNames: []string{"windsurf.exe"},
 			Scope:        "builtin",
+		},
+		Copilot: {
+			Path:      ".github/copilot-instructions.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{".github/copilot-instructions.md"},
+			EnvKeys:   []string{"COPILOT_AGENT"},
+			Scope:     "builtin",
+		},
+		Trae: {
+			Path:         ".trae/rules/agate.mdc",
+			Format:       "frontmatter-md",
+			Confirmed:    true,
+			Source:       "Agate 内置入口映射",
+			Reads:        []string{".trae/rules/agate.mdc"},
+			EnvKeys:      []string{"TRAE_AGENT"},
+			ProcessNames: []string{"trae.exe"},
+			Scope:        "builtin",
+		},
+		OpenCode: {
+			Path:      ".opencode/instructions.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{".opencode/instructions.md", "AGENTS.md"},
+			EnvKeys:   []string{"OPENCODE_AGENT"},
+			Scope:     "builtin",
+		},
+		QwenCode: {
+			Path:      "QWEN.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{"QWEN.md"},
+			EnvKeys:   []string{"QWEN_AGENT", "QWEN_CODE"},
+			Scope:     "builtin",
+		},
+		Cline: {
+			Path:      ".cline/rules/agate.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{".cline/rules/agate.md"},
+			EnvKeys:   []string{"CLINE_AGENT"},
+			Scope:     "builtin",
+		},
+		Kiro: {
+			Path:         ".kiro/steering/agate.md",
+			Format:       "markdown",
+			Confirmed:    true,
+			Source:       "Agate 内置入口映射",
+			Reads:        []string{".kiro/steering/agate.md"},
+			EnvKeys:      []string{"KIRO_AGENT"},
+			ProcessNames: []string{"kiro.exe"},
+			Scope:        "builtin",
+		},
+		AntigravityCLI: {
+			Path:      ".gemini/GEMINI.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{".gemini/GEMINI.md"},
+			EnvKeys:   []string{"ANTIGRAVITY_CLI"},
+			Scope:     "builtin",
+		},
+		GeminiCLI: {
+			Path:      "GEMINI.md",
+			Format:    "markdown",
+			Confirmed: true,
+			Source:    "Agate 内置入口映射",
+			Reads:     []string{"GEMINI.md"},
+			EnvKeys:   []string{"GEMINI_CLI"},
+			Scope:     "builtin",
 		},
 	}
 }
@@ -202,6 +280,17 @@ func Profiles(custom map[string]Profile) (map[Kind]Profile, error) {
 			if !validateCleanToken(tp) {
 				return nil, fmt.Errorf("工具档案 %q 的 term_programs 不能包含空值、空白或控制字符: %q", name, tp)
 			}
+		}
+		p.ProcessNames = append([]string(nil), p.ProcessNames...)
+		for i, pn := range p.ProcessNames {
+			trimmed := strings.TrimSpace(pn)
+			if trimmed == "" || strings.IndexFunc(trimmed, unicode.IsControl) >= 0 {
+				return nil, fmt.Errorf("工具档案 %q 的 process_names 不能包含空值或控制字符: %q", name, pn)
+			}
+			if strings.ContainsAny(trimmed, "/\\*?") {
+				return nil, fmt.Errorf("工具档案 %q 的 process_names 必须为可执行文件名，不能包含路径或通配符: %q", name, pn)
+			}
+			p.ProcessNames[i] = strings.ToLower(trimmed)
 		}
 		if p.Scope == "" {
 			p.Scope = "project"

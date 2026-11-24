@@ -266,6 +266,21 @@ func (p *Plan) refreshGit() error {
 	return nil
 }
 
+// CheckPathTracked 供原生 Hook 与规则分发共用的 Git 跟踪核对入口。
+func CheckPathTracked(root, relPath string) (bool, error) {
+	cmd := exec.Command("git", "--literal-pathspecs", "-C", root, "ls-files", "--error-unmatch", "--", relPath)
+	if _, err := cmd.Output(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+			return false, nil
+		}
+		if _, statErr := os.Stat(filepath.Join(root, ".git")); statErr != nil {
+			return false, nil
+		}
+		return false, fmt.Errorf("核对 %s 的 Git 跟踪状态失败: %w", relPath, err)
+	}
+	return true, nil
+}
+
 func (p *Plan) tracked(path string) (bool, error) {
 	if !p.isGit {
 		return false, nil

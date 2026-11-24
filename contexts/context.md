@@ -1,8 +1,13 @@
 # 领域上下文地图 (Context Map)
 
+本页记录当前行为与运行边界。命令入口和对应源码见 [项目模块地图](../MAP.md)。
+
 ## 1. 核心业务与领域模型
-- **单一事实源与指令语义扩写 (SSOT & Intent Expansion)**: 核心规约由 `internal/templates/SKILL.md` 固化，通过 `pkg/adapter` 分发映射至各大 Agent 工具配置文件；支持三大规则渲染范式（`markdown` 受管区块合并、`frontmatter-md` 保留或生成 YAML Frontmatter 的 `.mdc` 规则、`pointer` 轻量寻路指针引用并内嵌规则哈希摘要），Codex 保持 `AGENTS.md` 中的既有标记；建立“模糊指令深度扩写 vs 清晰指令收敛直通”双轨分流，约束宿主模型在处理简短/口语化需求时结合 Git 活跃现场与 3-Hop 双地图进行语义扩写，处理清晰指令时遵循最小影响原则收敛展开；项目架构拓扑独立收敛于 `MAP.md`，与 `contexts/context.md` 构成 3-Hop 寻路双地图。来源统一不保证不同时间生成的入口或运行中会话同版。
-- **开放式智能体指纹识别与多源身份感知 (Open Agent Fingerprinting & Multi-Source Context)**: 通过 `pkg/agent` 集中感知当前环境中的内置 Agent（Codex, Cursor, Antigravity, Claude, Windsurf）、自定义扩展工具档案、白名单远程服务端路径（`/.cursor-server/` 与 `/.vscode-server/` 对照，区分活跃会话专有变量与全局 `PATH`）、受限祖先进程链（Linux 默认 4 层，Windows 默认 8 层且硬上限 8 层；Windows 用进程快照读取已确认的本地可执行文件 `Cursor.exe`、`Code.exe`、`Code - Insiders.exe`，尚未取得实据的身份不进入匹配表；访问被拒绝或链路异常时保留已核验节点并降级，活跃祖先进程自动压制跨宿主残留环境变量）及跨会话声明上下文（`AGATE_SESSION_CONTEXT`，具备长度 ≤512B、版本锁定、凭据防火墙、`exp/iat` 时效、受控 `src` 白名单 `terminal`/`ssh`/`extension`/`ide`/`ci` 与 `SessionID` 脱敏/终端一致性校验）；本地进程证据只作用于 Editor，不增加 Runner 判定。实现宿主编辑器（Editor）与实际执行者（Runner）的精确解耦，采用全量候选汇总与冲突检测（`known`/`unknown`/`ambiguous`），`EffectiveTarget()` 优先采信已确知的 `Runner` 而不受 `Editor` 冲突拖累，根除顺序盲猜与硬编码兜底。
+- **规约来源与分发**。内置规约由 `internal/templates/SKILL.md` 提供。`agate init` 优先读取执行用户的全局规约，再通过 `pkg/adapter` 为选中的工具生成受管入口。提示词编译对清晰指令收敛范围，对模糊指令结合 Git 现场、`MAP.md`、`TASK.md` 和符合准入范围的 `MEMORY.md` 卡片补足锚定信息。
+- **宿主与执行者识别**。`pkg/agent` 分别汇总宿主编辑器（Editor）与实际执行者（Runner）的候选，输出 `known`、`unknown` 或 `ambiguous`。唯一可信的 Runner 优先。Runner 未知时，才采用唯一可信的 Editor。
+  - Windows 默认采集 8 层祖先进程，Linux 默认 4 层，硬上限 8 层。当前进程链上的精确文件名和白名单服务端路径可提供 Editor 证据。受限或中断时保留已经核实的证据。
+  - 环境变量、远程路径及受校验的 `AGATE_SESSION_CONTEXT` 可提供补充证据。通用 `TERM_PROGRAM=vscode` 和全局 `PATH` 中的工具只提供环境线索。
+  - `AGATE_SESSION_CONTEXT` 最长 512 字节，校验版本、时间和 `src` 来源。允许的来源为 `terminal`、`ssh`、`extension`、`ide`、`ci`。会话标识仅用于内部一致性校验，诊断输出会脱敏。
 - **隐形隔离与窗口级视图过滤 (Invisible Isolation & Per-Tool Workspace View)**: AI 私有状态（`.agents/`, `.gemini/`, `.cursorrules`, `TASK.md`, `MEMORY.md`, `.agate/config.local.toml` 及自定义未跟踪规则路径等）仅注册在本地 `.git/info/exclude`，严禁污染团队公共 `.gitignore` 与 Git 提交树；同时通过 `agate workspace` 在 `.ai-memory/workspaces/<target>.code-workspace` 生成窗口独立的规则过滤视图，在不修改 `.vscode/settings.json` 与物理规则文件的前提下实现同仓多工具窗口展示隔离（注：隐藏仅影响当前窗口展示，不代表停止客户端加载）。
 - **闭环自检与两振熔断**: 代码变更后强制执行 `agate verify`（或 `agent-verify`），两振未果强制退出交还主控权；`--resume-after-break` 仅在当次恢复自检真正通过后才清除 `.verify_streak` 计数，若再次失败则继续维持熔断锁死。
 - **三层策略配置与安全单调收紧 (Three-Tier Config & Monotonic Tightening)**: 支持个人全局（`~/.agate/config.toml` 或 `AGATE_GLOBAL_CONFIG`）、团队项目级（`.agate/config.toml`）与本机私有（`.agate/config.local.toml`）三层配置合并；本机私有覆写对安全门禁（`guard.strict`、`hooks.install`、`guard.todo`、`guard.absolute_path`）强制执行“单调收紧（只升不降）”，严禁本机配置私自放宽团队安全红线。
@@ -11,9 +16,9 @@
 ## 2. 关键 API 与环境约定
 - **CLI 命令契约**:
   - `agate init [-t <工具或all>] [--dry-run] [--allow-tracked] [--no-hook]`: 先生成和展示规则分发计划，检查无冲突后才装配护栏与地图资产；`--dry-run` 不写入任何项目文件或 Git 配置；`--allow-tracked` 仅允许更新计划中已跟踪的规则，不改变提交或推送授权；
-  - `agate profile [list|add <name>]`: 管理内置与开放式自定义 AI 工具档案，`add` 支持 `--path`、`--format markdown|frontmatter-md|pointer`、`--env`、`--term-program`、`--reads`、`--frontmatter`、`--global`、`--local`，未知子命令返回用法错误退出码 `2`；
+  - `agate profile list` 列出内置和自定义工具档案。`agate profile add <名称> --path <相对路径>` 注册规则入口，可通过 `--process-name`、`--env` 和 `--term-program` 声明识别信号。`--global` 选择个人全局配置，`--local` 选择本机私有配置，默认写入项目配置。
   - `agate detect [--explain] [--json]`: 只读诊断当前宿主编辑器、执行 Agent、白名单路径、祖先进程与网络传输环境指纹（支持 `--explain` 脱敏详细证据链与 `SessionID` 抹除防护，以及 `--json` 机器格式输出）；
-  - `agate prompt [<instruction>] [-s <scope>] [--no-dirty] [--json] [--hook] [--host <宿主> --event <事件>] [--set-diagnosis <状态> --request-id <id> --evidence <文本>]`: 自然语言意图物理锚定与结构化 Prompt 编译器。锚定置信度 `explicit` 只表示目标文件已明确，不表示根因已查明。未指定 `--host` 时，`--hook` 与 `--json` 保持原有输出。`--host cursor` 必须与 `--hook` 和 `--event beforeSubmitPrompt|preToolUse|postToolUse` 同时使用，且不能与 `--json` 混用；标准输出只返回该事件允许的 JSON，仅不支持的 `--host`/`--event` 返回用法错误退出码 `2`，协议内业务拒绝返回对应事件 JSON 与退出码 `1`。`beforeSubmitPrompt` 将编译信封落盘为 `.git/agate/requests/<requestID>.context.md` 并维护会话活跃指针；`postToolUse` 仅在读取工具命中当前请求上下文产物时更新交付状态；`preToolUse` 校验上下文交付与诊断放行后才允许写入/Shell/MCP 工具；`--set-diagnosis confirmed` 需经五要素诊断文本校验通过后方可流转。空指令、显式空白 `-s ""`、非法越界路径或单独指定顶层容器目录（`-s pkg` / `-s internal`）严格返回用法错误退出码 `2`；
+  - `agate prompt [<instruction>] [-s <scope>] [--no-dirty] [--json] [--hook]` 编译自然语言指令。`explicit` 表示锚定了目标。`--set-diagnosis <状态> --request-id <id> [--evidence <文本>]` 可单独登记诊断。登记 `confirmed` 时，`--evidence` 需要说明现象与预期、位置与证据、因果、不确定项和方案依据。空指令或无效范围返回退出码 `2`。
   - `agate workspace [plan|apply|restore|open <target>]`: 预览、生成、清理或直接启动 `.ai-memory/workspaces/<target>.code-workspace` 独立窗口视图（支持 `-t` 逗号分隔多目标与显式空白参数拦截），对纯 CLI 工具（`codex`、`claude`）安全降级跳过，未知子命令返回用法错误退出码 `2`；
   - `agate isolate`: 注入本地私有排除规则（17 项默认隐形隔离清单，含 `.env*` 与 `*.agate.bak`）；
   - `agate verify [--staged] [--strict] [--skip-guard] [--report] [--resume-after-break]`: 执行本地多级自检闭环，退出码严格约定：`0` 为 PASS，`1` 为 FAIL；连续失败 2 次触发 `.ai-memory/.verify_streak` 物理两振熔断，后续运行须由人类显式传入 `--resume-after-break` 且当次自检通过方可解除熔断；支持 `--report` 自动生成 HTML 审查报告；
@@ -40,8 +45,9 @@
 - **自举验证契约**:
   - 项目根目录具备 `verify.cmd` / `verify.sh`，优先保障本地验证开箱即走。
 - **开放式规则分发与并存契约**:
-  - 目标选择顺序为显式 `-t` > 项目/本机 `agent.targets`（默认装配集合）> 当前环境指纹（内置 + 自定义档案 `env_keys`/`term_programs`）> 已有规则入口；空白未知环境报错要求选择，不猜测工具。已有入口只提供选择线索，不证明工具正在运行。
-  - 自定义工具通过 `[agent.profiles.<名称>]`（或 `agate profile add`）声明 `path`、`format`（`markdown` | `frontmatter-md` | `pointer`）、`confirmed = true`、`source`、`version`，可选 `reads`、`env_keys`、`term_programs`、`frontmatter`；确认只表示用户核对写入路径，所有客户端加载与刷新结果仍标为未验证。
+  - 目标选择顺序为显式 `-t`、有效配置中的 `agent.targets`、当前环境中可确定的工具。识别结果未知或冲突时，`init` 停止自动分发并提示用 `-t`，已有规则入口仅作为选择线索。显式的 `-t all` 选择全部内置分发目标和已声明的自定义工具。
+  - 全局规约按执行用户家目录依次查找 `~/.agate/rules.md`、`~/.config/agate/rules.md`、`~/my_skills/SKILL.md`、`~/.gemini/config/SKILL.md`，使用第一个命中的规约文件。命中文件但无法读取时初始化终止。未找到时使用二进制内置正文。服务器按运行 Agate 的账号查找。检测到旧版内容时，差异提示供用户复核。
+  - 自定义工具通过 `[agent.profiles.<名称>]` 或 `agate profile add` 声明 `path`、`format`、`confirmed = true`、`source` 和 `version`。可选字段包括 `reads`、`env_keys`、`term_programs`、`process_names` 和 `frontmatter`。`process_names` 只接受可执行文件名，采用不区分大小写的精确匹配。入口确认和真实客户端加载分别验证。
   - 自定义路径使用 `/` 分隔的项目内相对路径，支持 `.md`、`.mdc`、`.rules` 或隐藏 rules 文件；拒绝越界、绝对路径、系统保留名、配置与私有资产路径（含 `verify.cmd`、`verify.sh`、`verify.bat`、`.ignore`）、内置入口碰撞及符号链接。
   - 示例配置如下；示例工具为虚构名称，真实工具须按其实际手册核对路径和版本：
 
@@ -57,6 +63,7 @@
     reads = ["AGENTS.md"]
     env_keys = ["EXAMPLE_AGENT"]
     term_programs = ["example-ide"]
+    process_names = ["example-ide.exe"]
     ```
 
   - 显式目标仅更新所选入口；受管区块外的用户内容与已有 `.agate.bak` 保留（`frontmatter-md` 更新已有 `.mdc` 时严格保留第 1 行用户 YAML Frontmatter，`pointer` 写入轻量寻路引导块并内嵌 `<!-- agate:rules-sha256:<hex> -->` 保证盘点摘要一致），无法确认归属的旧正文追加区块并提示人工核验；含其他工具受管标记、重复／残缺标记、已跟踪文件未获允许（含大小写不敏感文件系统下通过 `git ls-files -z` 与 `os.SameFile` 识别的同名物理文件）或计划快照变化均阻断规则写入（若全部条目均为 `skip` 则无锁短路返回）。
@@ -69,15 +76,66 @@
 - **跨平台兼容与归档收敛**:
   - Windows 环境优先尝试软链接，权限受限时优雅降级为物理拷贝（`CopyFile`），非 Windows 相对路径软链自动计算相对于目标父目录的路径；
   - 换行符与 Frontmatter 解析原生兼容 CRLF/LF，防御边界截断漂移；
-  - 归档工具（`scripts/archive.ps1` / `scripts/archive.sh`）原生支持全平台零 CGO 交叉编译（Windows amd64, Linux amd64, macOS amd64/arm64），产物纯净收敛于 `bin/v<version>/` 对应目录。
+  - `scripts/archive.ps1` 与 `scripts/archive.sh` 读取 `cmd/root.go` 中的版本，生成 Windows amd64、Linux amd64、macOS amd64 和 macOS arm64 的零 CGO 归档。输出位于 `bin/v<version>/`，Windows 脚本同时刷新 `bin/agate.exe`。
+  - 归档和本机安装分别核验。Windows 可用 `Get-Command agate,agate-hooks` 查实际路径，分别运行 `--version`，并比对安装文件与归档的 SHA-256。若项目把 Cursor Hook 指向单独的程序，也要核对该程序。
+
+### Cursor 原生 Hook
+
+原生模式使用 `agate prompt --hook --host cursor --event <事件>`。标准输出只返回事件协议 JSON。`--json` 用于普通编译输出。项目可通过 `.cursor/hooks.json` 注册原生事件，`agate init` 的规则分发和 Git 门禁安装是独立步骤。
+
+| 事件 | 行为 |
+| --- | --- |
+| `beforeSubmitPrompt` | 编译当前用户消息，在 Git 公共目录的 `agate/requests/` 下写入本轮上下文和请求记录，初始交付状态为 `pending_read`。收到单独的「执行」时，关联同会话、同工作区的当前待确认方案。 |
+| `postToolUse` | 通过 `additional_context` 提供本轮上下文的绝对路径。原生读取命中本轮文件时，登记 `observed_read` 和 `delivery_evidence`。方案轮和确认轮分别读取自己的文件。 |
+| `afterAgentResponse` | 从已交付请求的最终回复提取 `agate-plan`，记录诊断状态、方案标识及精确的仓库相对文件路径，等待用户确认。 |
+| `preToolUse` | 检查上下文交付、诊断、当前授权及目标文件。允许范围内的原生文件修改。Shell 在会话有效后、进入诊断检查之前放行，不按命令文本筛选。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。 |
+
+请求记录可核对上下文交付和审批。实际写入结果以客户端事件和文件状态为准。
+
+### Antigravity IDE 原生 Hook
+
+原生模式使用 `agate prompt --hook --host antigravity --event <事件>`。项目挂载 `.agents/hooks.json`。拒绝时标准输出只返回 `{"decision":"deny","reason":"..."}`。
+
+IDE 2.8.0 的 `PostInvocation` 不带 `response`。适配器改读 `transcriptPath`，只取 `step_index` 不大于本次 `initialNumSteps` 的最后一条 `PLANNER_RESPONSE`，从中解析 `agate-plan`。确认轮没有 TurnID 时，绑定当前快照的 `ActiveTurnID`，不另造会话。
+
+| 事件 | 行为 |
+| --- | --- |
+| `PreInvocation` | `invocationNum` 为 0 时视为用户提交并编译上下文。同一 `lastUserInput` 的后续调用视为模型续跑，不重复当作新提交。 |
+| `PostToolUse` | 读取成功且路径为本轮上下文时，登记 `observed_read`。失败读取不产生已读回执。 |
+| `PostInvocation` | 从上面的回复来源登记方案。没有可信 `agate-plan` 时不登记候选方案。 |
+| `PreToolUse` | 与其他宿主共用 `ApplyNativeWorkflow`。未确认或超出方案文件范围时拒绝，文件不落盘。 |
+| `Stop` | 解码分支已接上，实机尚未覆盖主动停止。 |
+
+2026-11-24 在 Antigravity IDE 2.8.0、Windows 临时仓库上完成实机矩阵：方案登记、「执行」确认、范围内 `sample.txt` 写入放行、未确认的 `other.txt` 被 pre-tool hook 拒绝且文件不存在。该次使用手工 Hook 与候选二进制，版本目录仍为空，`agate init` 还不会按已验收版本自动挂载。
+
+### 多宿主统一 Native Hook 契约
+
+- **统一 NativeAdapter 协议模型**：
+  - 内部统一抽象为 `NativeEvent`（`Kind`: `submit`, `read_completed`, `response_completed`, `before_tool`, `observe`）与判定决策 `NativeDecision`（`Block`, `Reason`, `AdditionalContext`）；
+  - 各宿主实现 `NativeAdapter` 接口（`Decode`/`Encode`），实现客户端私有协议与统一模型间的双向编解码；
+  - 会话快照与锁统一隔离于 Git 公共目录的 `agate/requests/v2/<host>/<workspace-hash>/`，以“宿主 + 工作区 + 会话”为锁粒度；
+  - 写入判定统一由 `ApplyNativeWorkflow` 驱动：上下文已读交付门禁 -> 诊断状态门禁 -> 真人显式“执行”方案锁定 -> 精确目标文件范围核验。文件编辑走这道门并核对路径。Shell 在会话有效后、进入诊断检查之前放行，不检查命令文本。没有会话标识的 Shell 拒绝。MCP 不能借用该授权。
+- **预写入拒绝契约 (PreToolUse / Pre-Write)**：
+  - Cursor：stdout 输出 `{"permission":"deny","user_message":"..."}`；
+  - Antigravity IDE：stdout 输出 `{"decision":"deny","reason":"..."}`（挂载 `.agents/hooks.json`）；
+  - Claude Code：stdout 输出 `hookSpecificOutput` 带 `permissionDecision: "deny"`（挂载 `.claude/settings.json`）；
+  - Codex：stdout 输出 `hookSpecificOutput` 带 `permissionDecision: "deny"`（支持 `apply_patch` 多目标解析）；
+  - Windsurf Cascade：stderr 打印理由，并以 **退出码 2** 强制阻断（挂载 `.windsurf/hooks.json`）。
+- **扩展内置工具矩阵**：
+  - 第一批：GitHub Copilot (`.github/copilot-instructions.md`), TRAE IDE (`.trae/rules/agate.mdc`), OpenCode (`.opencode/instructions.md`), Qwen Code (`QWEN.md`)；
+  - 第二批：Cline (`.cline/rules/agate.md`), Kiro (`.kiro/steering/agate.md`), Antigravity CLI (`.gemini/GEMINI.md`), Gemini CLI (`GEMINI.md`)。
+  - `agate init` 支持通过 `--native-hooks=auto|off|require` 自动合并生成宿主原生 Hook 配置。
 
 ## 3. 动作外溢与显式授权公理 (Explicit Mandate Principle)
 - **动作二分基线**：
   - **本地闭环动作**（代码编辑、本地编译、单测运行与自检）：常规任务及方案确认后准予闭环探索；
-  - **外溢与跃迁动作**（Git 提交/推送、Release 上传、包发布、部署推流、破坏性变更）：**默认物理死锁**。
+  - **外溢与跃迁动作**（Git 提交/推送、Release 上传、包发布、部署推流、破坏性变更）：默认不代跑。
 - **授权铁律（指哪打哪）**：
   - 严禁以“顺带闭环”为由代跑任何外溢动作；
   - 必须且仅当用户指令中出现明确指向该外溢动作的专属动词（如“提交代码”、“上传Release”、“发布”）时，对应操作方可单次解锁代跑。
+- **与两道物理门的关系**：
+  - 上面的动词约束交给 Agent 遵守。原生 Hook 不解析 Shell 命令，也不用命令名单执行这条约束。会话有效时，Shell 在诊断检查之前放行。
+  - Git `pre-push` 仍单独拦截自动化推送。Agent 或非交互环境需要 `ALLOW_AUTOMATED_PUSH=1` 才进入后续校验。
 
 ## 4. 跨 Agent / 多角色任务接力与记忆资产防线 (Relay, Multi-Role & Memory Governance)
 - **接力四要素、多角色流转与状态机**：`TASK.md` 采用标准 YAML Frontmatter（含 `current_role`、`next_role` 多角色字段与 `snapshot_digest` 代码快照摘要）+ Markdown 结构；支持 `dev`（编码实现）、`test`（独立验收）、`ops`（运维审查）三类角色并在 `.ai-memory/sessions/active-role.md` 生成当前会话专属角色边界卡（零侵入根目录共享 `AGENTS.md`/`.cursorrules`）；换工具或换角色前必须执行 `agate task handover` 固化物证并记录代码快照摘要，新工具/新角色启动首句执行 `agate task resume` 接棒（校验指定 `next_agent`、`next_role` 身份，并在 `test`/`ops` 角色发现快照过期或物证缺失时输出阻塞级复验提示），全量任务交付归档执行 `agate task done`（`ops` 角色强制校验审查物证与最新 `snapshot_digest` 绑定）。

@@ -62,8 +62,8 @@ func TestCursorHookBlocksWriteUntilDiagnosisAndDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 校验 Write、Shell、MCP 等全部写路径均被拦截
-	for _, toolName := range []string{"Write", "Shell", "mcp_filesystem_write"} {
+	// 校验 Write 与 MCP 在未交付时被拦截。Shell 不进入这道门。
+	for _, toolName := range []string{"Write", "mcp_filesystem_write"} {
 		write := []byte(`{"conversation_id":"conv","generation_id":"gen","tool_name":"` + toolName + `"}`)
 		blocked, err := HandleCursorEvent(CursorEventOptions{
 			Host: "cursor", Event: "preToolUse", Payload: write, RecordDir: dir, WorkDir: dir,
@@ -94,10 +94,12 @@ func TestCursorHookBlocksWriteUntilDiagnosisAndDelivery(t *testing.T) {
 	}
 
 	// 读取本次请求的上下文产物（不带 generation_id，测试会话活跃指针关联）
-	artifactName := filepath.Base(submitRes.State.ContextPath)
-	read := []byte(`{"conversation_id":"conv","tool_name":"Read","file_path":".git/agate/requests/` + artifactName + `"}`)
+	readPayload, err := json.Marshal(map[string]any{"conversation_id": "conv", "tool_name": "Read", "file_path": submitRes.State.ContextPath})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := HandleCursorEvent(CursorEventOptions{
-		Host: "cursor", Event: "postToolUse", Payload: read, RecordDir: dir, WorkDir: dir,
+		Host: "cursor", Event: "postToolUse", Payload: readPayload, RecordDir: dir, WorkDir: dir,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +133,98 @@ func TestCursorHookBlocksWriteUntilDiagnosisAndDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(allowed.Stdout), `"permission":"allow"`) {
-		t.Fatalf("诊断和交付都完成后应放行: %s", allowed.Stdout)
+	if !strings.Contains(string(allowed.Stdout), `"permission":"deny"`) {
+		t.Fatalf("诊断和交付完成但用户尚未确认时应阻断: %s", allowed.Stdout)
+	}
+}
+
+func TestContextReadRejectsMatchingBasenameInOtherDirectory(t *testing.T) {
+	state := RequestState{RequestID: "request", ContextPath: filepath.Join(t.TempDir(), "request.context.md")}
+	body := cursorEventBody{ToolName: "Read", FilePath: filepath.Join(t.TempDir(), "request.context.md")}
+	if isContextReadForRequest(body, state) {
+		t.Fatal("其他目录的同名文件不能作为读取回执")
+	}
+}
+
+func TestCursorApprovalFollowsCurrentDeliveredPlan(t *testing.T) {
+	workspace := t.TempDir()
+	records := t.TempDir()
+	call := func(event, conversation, generation string, fields map[string]any) CursorEventResult {
+		t.Helper()
+		fields["conversation_id"] = conversation
+		fields["generation_id"] = generation
+		payload, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := HandleCursorEvent(CursorEventOptions{
+			Host: "cursor", Event: event, Payload: payload, RecordDir: records, WorkDir: workspace,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", event, err)
+		}
+		return result
+	}
+	read := func(generation, path string) CursorEventResult {
+		return call("postToolUse", "conv", generation, map[string]any{
+			"tool_name": "Read", "tool_input": map[string]any{"path": path},
+		})
+	}
+	assertPermission := func(conversation, generation, tool, path, want string) {
+		t.Helper()
+		result := call("preToolUse", conversation, generation, map[string]any{
+			"tool_name": tool, "tool_input": map[string]any{"path": path},
+		})
+		var response struct{ Permission string }
+		if err := json.Unmarshal(result.Stdout, &response); err != nil || response.Permission != want {
+			t.Fatalf("%s %s: 期望 %s，得到 %s", tool, path, want, result.Stdout)
+		}
+	}
+	proposal := call("beforeSubmitPrompt", "conv", "one", map[string]any{"prompt": "给 sample.txt 增加一行"})
+	plan := "拟修改 sample.txt，追加一行。\n\n```agate-plan\n{\"files\":[\"sample.txt\"],\"diagnosis\":\"not_applicable\"}\n```\n\n请回复‘执行’。"
+	response := call("afterAgentResponse", "conv", "one", map[string]any{"text": plan})
+	if response.State.PendingPlan != nil {
+		t.Fatal("未交付本次上下文时不能登记方案")
+	}
+	assertPermission("conv", "one", "Read", "sample.txt", "allow")
+	if result := read("one", filepath.Join(workspace, "sample.txt")); !strings.Contains(string(result.Stdout), "additional_context") {
+		t.Fatal("普通读取后应提供当前请求的绝对路径")
+	}
+	read("one", proposal.State.ContextPath)
+	hypothesis := strings.Replace(plan, "not_applicable", "hypothesis", 1)
+	if result := call("afterAgentResponse", "conv", "one", map[string]any{"text": hypothesis}); result.State.PendingPlan != nil {
+		t.Fatal("待验证假设不能登记成待确认修复方案")
+	}
+	call("afterAgentResponse", "conv", "one", map[string]any{"text": plan})
+	assertPermission("conv", "one", "Write", "sample.txt", "deny")
+	other := call("beforeSubmitPrompt", "other", "two", map[string]any{"prompt": "执行"})
+	if other.State.PlanConfirmed {
+		t.Fatal("不应跨会话绑定方案")
+	}
+	originalWorkspace := workspace
+	workspace = t.TempDir()
+	other = call("beforeSubmitPrompt", "conv", "two", map[string]any{"prompt": "执行"})
+	if other.State.PlanConfirmed {
+		t.Fatal("不应跨工作区绑定方案")
+	}
+	workspace = originalWorkspace
+	confirmation := call("beforeSubmitPrompt", "conv", "two", map[string]any{"prompt": "执行"})
+	if !confirmation.State.PlanConfirmed || confirmation.State.ApprovedPlanID != proposal.State.RequestID {
+		t.Fatalf("确认未绑定到当前方案: %+v", confirmation.State)
+	}
+	read("two", proposal.State.ContextPath)
+	assertPermission("conv", "two", "Write", "sample.txt", "deny")
+	read("two", confirmation.State.ContextPath)
+	assertPermission("conv", "two", "Write", "sample.txt", "allow")
+	assertPermission("conv", "two", "Write", "other.txt", "deny")
+	assertPermission("conv", "two", "Shell", "sample.txt", "allow")
+	call("beforeSubmitPrompt", "conv", "three", map[string]any{"prompt": "改成 other.txt"})
+	call("beforeSubmitPrompt", "conv", "two", map[string]any{"prompt": "执行"})
+	assertPermission("conv", "two", "Write", "sample.txt", "deny")
+	call("afterAgentResponse", "conv", "one", map[string]any{"text": plan})
+	replay := call("beforeSubmitPrompt", "conv", "four", map[string]any{"prompt": "执行"})
+	if replay.State.PlanConfirmed {
+		t.Fatal("方案调整后不能重放旧授权")
 	}
 }
 
@@ -143,5 +235,76 @@ func TestCursorHookRejectsUnknownHostAndInvalidPayload(t *testing.T) {
 	result, err := HandleCursorEvent(CursorEventOptions{Host: "cursor", Event: "beforeSubmitPrompt", Payload: []byte(`not-json`), RecordDir: t.TempDir()})
 	if err == nil || !strings.Contains(string(result.Stdout), `"continue":false`) {
 		t.Fatalf("无效载荷应明确失败，err=%v stdout=%s", err, result.Stdout)
+	}
+}
+
+func TestCursorPreToolUse_ShellRequiresConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	for _, command := range []string{"git status", "echo foo > bar.txt", "agate verify"} {
+		payload, err := json.Marshal(map[string]any{
+			"conversation_id": "conv-shell",
+			"generation_id":   "gen-shell",
+			"tool_name":       "Shell",
+			"tool_input":      map[string]any{"command": command},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := HandleCursorEvent(CursorEventOptions{
+			Host: "cursor", Event: "preToolUse", Payload: payload, RecordDir: dir, WorkDir: dir,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(res.Stdout), `"permission":"allow"`) {
+			t.Fatalf("Shell %q 应在诊断检查之前放行，实际: %s", command, res.Stdout)
+		}
+	}
+}
+
+func TestCursorPreToolUse_ConfirmedFileScope(t *testing.T) {
+	dir := t.TempDir()
+	convID := "conv-scope"
+	genID := "gen-scope"
+	reqID := RecordID(convID, genID, dir)
+	// 保存已确认方案，范围限定为 pkg/agent/profile.go
+	state := RequestState{
+		RequestID:        reqID,
+		InstructionHash:  hashText("修改 profile"),
+		WorkspaceID:      hashText(dir),
+		RuleVersion:      RuleVersion,
+		CompileStatus:    "compiled",
+		DeliveryMode:     "observed_read",
+		DeliveryEvidence: "read:context.md",
+		Diagnosis:        DiagnosisConfirmed,
+		PlanConfirmed:    true,
+		ConfirmedFiles:   []string{"pkg/agent/profile.go"},
+	}
+	if err := SaveRequestState(dir, state); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 修改在范围内的文件 -> 放行
+	inScopePayload := []byte(`{"conversation_id":"` + convID + `","generation_id":"` + genID + `","tool_name":"Edit","file_path":"pkg/agent/profile.go"}`)
+	inRes, err := HandleCursorEvent(CursorEventOptions{
+		Host: "cursor", Event: "preToolUse", Payload: inScopePayload, RecordDir: dir, WorkDir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(inRes.Stdout), `"permission":"allow"`) {
+		t.Fatalf("范围内文件应当被放行，实际: %s", inRes.Stdout)
+	}
+
+	// 2. 修改超出范围的文件 -> 阻断
+	outScopePayload := []byte(`{"conversation_id":"` + convID + `","generation_id":"` + genID + `","tool_name":"Edit","file_path":"cmd/init.go"}`)
+	outRes, err := HandleCursorEvent(CursorEventOptions{
+		Host: "cursor", Event: "preToolUse", Payload: outScopePayload, RecordDir: dir, WorkDir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(outRes.Stdout), `"permission":"deny"`) || !strings.Contains(string(outRes.Stdout), "超出已确认方案范围") {
+		t.Fatalf("超范围文件应当被拦截，实际: %s", outRes.Stdout)
 	}
 }

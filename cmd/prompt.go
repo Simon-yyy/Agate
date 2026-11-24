@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -94,10 +95,41 @@ TASK.md 任务看板与 MEMORY.md 避坑卡片进行确定性动态锚定，生�
 			if readErr != nil {
 				return readErr
 			}
+			workDir, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			if _, ok := prompt.GetNativeAdapter(host); ok {
+				res, handleErr := prompt.HandleNativeEvent(prompt.NativeEventOptions{
+					Host:      host,
+					EventName: eventName,
+					Payload:   raw,
+					WorkDir:   workDir,
+				})
+				if res.Stderr != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), res.Stderr)
+				}
+				if len(res.Stdout) > 0 {
+					cmd.Print(string(res.Stdout))
+				}
+				// 宿主协议退出码优先（如 Windsurf 预写拒绝为 2），避免被通用错误映射成 1
+				if res.ExitCode != 0 {
+					os.Exit(res.ExitCode)
+				}
+				if handleErr != nil {
+					if errors.Is(handleErr, prompt.ErrUnsupportedHookTarget) {
+						return &UsageError{Err: handleErr}
+					}
+					return handleErr
+				}
+				return nil
+			}
+
 			result, handleErr := prompt.HandleCursorEvent(prompt.CursorEventOptions{
 				Host:    host,
 				Event:   eventName,
 				Payload: raw,
+				WorkDir: workDir,
 			})
 			if result.Stderr != "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), result.Stderr)
@@ -187,7 +219,7 @@ func init() {
 	promptCmd.Flags().StringSliceVarP(&flagPromptScopes, "scope", "s", nil, "显式指定或纠偏物理锚定的目标文件/模块路径（可逗号分隔或重复传入）")
 	promptCmd.Flags().BoolVar(&flagPromptIgnoreDirty, "no-dirty", false, "禁用 Git 活跃脏文件兜底关联，防止无关在途改动污染锚定结果")
 	promptCmd.Flags().String("host", "", "宿主原生协议名称；当前已核对的值是 cursor")
-	promptCmd.Flags().String("event", "", "宿主原生事件；cursor 支持 beforeSubmitPrompt、preToolUse、postToolUse")
+	promptCmd.Flags().String("event", "", "宿主原生事件；cursor 支持 beforeSubmitPrompt、preToolUse、postToolUse、afterAgentResponse")
 	promptCmd.Flags().String("set-diagnosis", "", "校验并更新指定请求的诊断状态 (confirmed|hypothesis|not_applicable)")
 	promptCmd.Flags().String("request-id", "", "与 --set-diagnosis 配合使用的请求记录标识")
 	promptCmd.Flags().String("evidence", "", "与 --set-diagnosis confirmed 配合使用的诊断说明文本")
